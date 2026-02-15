@@ -72,6 +72,12 @@ enum Command {
         /// Repository path for codebase context (enables repo map)
         #[arg(long)]
         repo: Option<PathBuf>,
+        /// Additional glob patterns to skip (e.g. "*.test.ts")
+        #[arg(long)]
+        skip_pattern: Vec<String>,
+        /// Include suggestion-level comments (default: only bug+warning)
+        #[arg(long)]
+        include_suggestions: bool,
     },
     /// Start the MCP server for IDE integration
     Mcp,
@@ -149,6 +155,8 @@ async fn main() -> Result<()> {
             ref file,
             post_comments,
             ref repo,
+            ref skip_pattern,
+            include_suggestions,
         } => {
             let diff_input = if let Some(pr_ref) = pr {
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
@@ -160,10 +168,57 @@ async fn main() -> Result<()> {
 
             let diffs = argus_difflens::parser::parse_unified_diff(&diff_input)?;
 
+            // Apply CLI overrides to review config
+            let mut review_config = config.review.clone();
+            if !skip_pattern.is_empty() {
+                review_config
+                    .skip_patterns
+                    .extend(skip_pattern.iter().cloned());
+            }
+            if include_suggestions {
+                review_config.include_suggestions = true;
+                if !review_config
+                    .severity_filter
+                    .contains(&argus_core::Severity::Suggestion)
+                {
+                    review_config
+                        .severity_filter
+                        .push(argus_core::Severity::Suggestion);
+                }
+            }
+
             let llm_client = argus_review::llm::LlmClient::new(&config.llm)?;
-            let pipeline =
-                argus_review::pipeline::ReviewPipeline::new(llm_client, config.review.clone());
+            let pipeline = argus_review::pipeline::ReviewPipeline::new(llm_client, review_config);
             let result = pipeline.review(&diffs, repo.as_deref()).await?;
+
+            // Verbose output
+            if cli.verbose {
+                eprintln!("--- Review Stats ---");
+                eprintln!(
+                    "Files reviewed: {} | Files skipped: {}",
+                    result.stats.files_reviewed, result.stats.files_skipped
+                );
+                if !result.stats.skipped_files.is_empty() {
+                    eprintln!("Skipped files:");
+                    for sf in &result.stats.skipped_files {
+                        eprintln!("  {} ({})", sf.path.display(), sf.reason);
+                    }
+                }
+                let token_estimate = diff_input.len() / 4;
+                eprintln!("Token estimate: ~{}", token_estimate);
+                eprintln!("LLM calls: {}", result.stats.llm_calls);
+                if result.stats.llm_calls > 1 {
+                    eprintln!("  (diff was split into per-file calls)");
+                }
+                eprintln!(
+                    "Comments: {} generated, {} filtered, {} deduplicated, {} final",
+                    result.stats.comments_generated,
+                    result.stats.comments_filtered,
+                    result.stats.comments_deduplicated,
+                    result.comments.len(),
+                );
+                eprintln!("--------------------");
+            }
 
             match cli.format {
                 OutputFormat::Json => {
