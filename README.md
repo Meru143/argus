@@ -17,6 +17,20 @@ intelligence, and LLM-powered reviews to catch what your copilot misses.
 
 ## Quick Start
 
+### Install via npm (easiest)
+
+```bash
+npx argus-ai --help
+npx argus-ai map --path .
+npx argus-ai review --file my.diff
+```
+
+Or install globally:
+
+```bash
+npm install -g argus-ai
+```
+
 ### Install from source
 
 ```bash
