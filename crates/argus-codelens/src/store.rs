@@ -230,7 +230,11 @@ impl CodeIndex {
         let existing = self.get_metadata("embedding_dimensions")?;
 
         if let Some(stored) = existing {
-            let stored_dims: usize = stored.parse().unwrap_or(0);
+            let stored_dims: usize = stored.parse().map_err(|_| {
+                ArgusError::Database(format!(
+                    "Corrupted dimension metadata in index: '{stored}'"
+                ))
+            })?;
             if stored_dims != dimensions {
                 return Err(ArgusError::Database(format!(
                     "Index was created with {stored_dims} dimensions but config specifies {dimensions}. \
@@ -250,7 +254,17 @@ impl CodeIndex {
     /// Returns [`ArgusError::Database`] on query failure.
     pub fn get_dimensions(&self) -> Result<Option<usize>, ArgusError> {
         let value = self.get_metadata("embedding_dimensions")?;
-        Ok(value.and_then(|v| v.parse().ok()))
+        match value {
+            Some(v) => {
+                let dims: usize = v.parse().map_err(|_| {
+                    ArgusError::Database(format!(
+                        "Corrupted dimension metadata in index: '{v}'"
+                    ))
+                })?;
+                Ok(Some(dims))
+            }
+            None => Ok(None),
+        }
     }
 
     fn get_metadata(&self, key: &str) -> Result<Option<String>, ArgusError> {
