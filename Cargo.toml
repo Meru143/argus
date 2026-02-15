@@ -45,6 +45,7 @@ ignore = "0.4"
 glob = "0.3"
 rusqlite = { version = "0.32", features = ["bundled", "vtab"] }
 sha2 = "0.10"
+rmcp = { version = "0.15", features = ["server", "transport-io"] }
 
 [package]
 name = "argus"

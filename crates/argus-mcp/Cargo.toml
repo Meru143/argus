@@ -5,4 +5,16 @@ edition.workspace = true
 
 [dependencies]
 argus-core = { workspace = true }
+argus-difflens = { workspace = true }
+argus-repomap = { workspace = true }
+argus-codelens = { workspace = true }
+argus-gitpulse = { workspace = true }
 argus-review = { workspace = true }
+rmcp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+serde_json = { workspace = true }
