@@ -132,6 +132,8 @@ enum Command {
     },
     /// Create a default .argus.toml configuration file
     Init,
+    /// Check your Argus setup and environment
+    Doctor,
     /// Generate shell completion scripts
     #[command(hide = true)]
     Completions {
@@ -166,6 +168,252 @@ fn read_diff_input(file: &Option<PathBuf>) -> Result<String> {
             Ok(input)
         }
     }
+}
+
+#[derive(serde::Serialize)]
+struct CheckResult {
+    name: &'static str,
+    status: &'static str,
+    detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<String>,
+}
+
+impl CheckResult {
+    fn pass(name: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            name,
+            status: "pass",
+            detail: detail.into(),
+            hint: None,
+        }
+    }
+
+    fn fail(name: &'static str, detail: impl Into<String>, hint: impl Into<String>) -> Self {
+        Self {
+            name,
+            status: "fail",
+            detail: detail.into(),
+            hint: Some(hint.into()),
+        }
+    }
+
+    fn info(name: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            name,
+            status: "info",
+            detail: detail.into(),
+            hint: None,
+        }
+    }
+
+    fn symbol(&self) -> &'static str {
+        match self.status {
+            "pass" => "\u{2713}",
+            "fail" => "\u{2717}",
+            _ => "~",
+        }
+    }
+}
+
+fn run_doctor(config: &argus_core::ArgusConfig, format: OutputFormat) -> Result<()> {
+    let mut checks: Vec<CheckResult> = Vec::new();
+
+    // 1. Git repository
+    let mut git_root = None;
+    let cwd = std::env::current_dir()?;
+    let mut dir = cwd.as_path();
+    loop {
+        if dir.join(".git").exists() {
+            git_root = Some(dir.to_path_buf());
+            break;
+        }
+        let Some(parent) = dir.parent() else {
+            break;
+        };
+        dir = parent;
+    }
+    match &git_root {
+        Some(root) => checks.push(CheckResult::pass(
+            "git_repository",
+            format!("detected at {}", root.display()),
+        )),
+        None => checks.push(CheckResult::fail(
+            "git_repository",
+            "not a git repository",
+            "run argus from inside a git repository",
+        )),
+    }
+
+    // 2. Config file
+    let config_path = std::path::Path::new(".argus.toml");
+    if config_path.exists() {
+        let rule_count = config.rules.len();
+        let detail = if rule_count > 0 {
+            format!(".argus.toml found ({rule_count} custom rules)")
+        } else {
+            ".argus.toml found".into()
+        };
+        checks.push(CheckResult::pass("config_file", detail));
+    } else {
+        checks.push(CheckResult::fail(
+            "config_file",
+            ".argus.toml not found",
+            "run 'argus init' to create a default config",
+        ));
+    }
+
+    // 3. LLM provider + API key
+    let llm_provider = &config.llm.provider;
+    let llm_model = &config.llm.model;
+    let llm_env_var = match llm_provider.as_str() {
+        "anthropic" => "ANTHROPIC_API_KEY",
+        "gemini" => "GEMINI_API_KEY",
+        _ => "OPENAI_API_KEY",
+    };
+    checks.push(CheckResult::pass(
+        "llm_provider",
+        format!("{llm_provider} (model: {llm_model})"),
+    ));
+    if config.llm.api_key.is_some() || std::env::var(llm_env_var).is_ok() {
+        checks.push(CheckResult::pass("llm_api_key", format!("{llm_env_var} set")));
+    } else {
+        checks.push(CheckResult::fail(
+            "llm_api_key",
+            format!("{llm_env_var} not set"),
+            format!("export {llm_env_var}=... or set api_key in .argus.toml"),
+        ));
+    }
+
+    // 4. Embedding provider + API key
+    let emb_provider = &config.embedding.provider;
+    let emb_model = &config.embedding.model;
+    let emb_env_var = match emb_provider.as_str() {
+        "gemini" => "GEMINI_API_KEY",
+        "openai" => "OPENAI_API_KEY",
+        _ => "VOYAGE_API_KEY",
+    };
+    checks.push(CheckResult::pass(
+        "embedding_provider",
+        format!("{emb_provider} (model: {emb_model})"),
+    ));
+    if config.embedding.api_key.is_some() || std::env::var(emb_env_var).is_ok() {
+        checks.push(CheckResult::pass(
+            "embedding_api_key",
+            format!("{emb_env_var} set"),
+        ));
+    } else {
+        checks.push(CheckResult::fail(
+            "embedding_api_key",
+            format!("{emb_env_var} not set"),
+            format!("export {emb_env_var}=... or set api_key in .argus.toml [embedding]"),
+        ));
+    }
+
+    // 5. Search index
+    let index_path = cwd.join(".argus/index.db");
+    if index_path.exists() {
+        let detail = match rusqlite::Connection::open_with_flags(
+            &index_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ) {
+            Ok(conn) => {
+                let count: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+                    .unwrap_or(0);
+                format!("exists ({count} chunks)")
+            }
+            Err(_) => "exists".into(),
+        };
+        checks.push(CheckResult::pass("search_index", detail));
+    } else {
+        checks.push(CheckResult::info(
+            "search_index",
+            "not found (run 'argus search --index' to create)",
+        ));
+    }
+
+    // 6. GitHub token
+    if std::env::var("GITHUB_TOKEN").is_ok() || std::env::var("GH_TOKEN").is_ok() {
+        checks.push(CheckResult::pass("github_token", "GITHUB_TOKEN set"));
+    } else {
+        checks.push(CheckResult::fail(
+            "github_token",
+            "GITHUB_TOKEN not set",
+            "export GITHUB_TOKEN=... (needed for --post-comments)",
+        ));
+    }
+
+    // 7. Git history
+    if git_root.is_some() {
+        match git2::Repository::discover(&cwd) {
+            Ok(repo) => {
+                let mut revwalk = repo.revwalk()?;
+                revwalk.push_head()?;
+                let since = chrono_days_ago(180);
+                let mut count = 0u64;
+                for oid in revwalk {
+                    let Ok(oid) = oid else { break };
+                    let Ok(commit) = repo.find_commit(oid) else {
+                        break;
+                    };
+                    if commit.time().seconds() < since {
+                        break;
+                    }
+                    count += 1;
+                }
+                checks.push(CheckResult::info(
+                    "git_history",
+                    format!("{count} commits in last 180 days"),
+                ));
+            }
+            Err(_) => {
+                checks.push(CheckResult::info("git_history", "unable to read git history"));
+            }
+        }
+    }
+
+    // Output
+    match format {
+        OutputFormat::Json => {
+            let version = env!("CARGO_PKG_VERSION");
+            let json = serde_json::json!({
+                "version": version,
+                "checks": checks,
+            });
+            println!("{}", serde_json::to_string_pretty(&json)?);
+        }
+        _ => {
+            let version = env!("CARGO_PKG_VERSION");
+            println!("Argus v{version} — Environment Check\n");
+
+            for check in &checks {
+                let sym = check.symbol();
+                // Pad the name for alignment
+                let label = check.name.replace('_', " ");
+                println!("  {sym} {label:<20} {}", check.detail);
+                if let Some(hint) = &check.hint {
+                    println!("    hint: {hint}");
+                }
+            }
+
+            let passed = checks.iter().filter(|c| c.status == "pass").count();
+            let failed = checks.iter().filter(|c| c.status == "fail").count();
+            let info = checks.iter().filter(|c| c.status == "info").count();
+            println!("\n{passed} checks passed, {failed} failed, {info} info");
+        }
+    }
+
+    Ok(())
+}
+
+fn chrono_days_ago(days: i64) -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    now - (days * 86400)
 }
 
 const DEFAULT_CONFIG: &str = r#"# Argus Configuration
@@ -721,6 +969,9 @@ async fn main() -> Result<()> {
             }
             std::fs::write(path, DEFAULT_CONFIG)?;
             println!("Created .argus.toml with default configuration");
+        }
+        Command::Doctor => {
+            run_doctor(&config, cli.format)?;
         }
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
