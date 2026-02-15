@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -30,6 +31,10 @@ struct Cli {
     /// Enable verbose output
     #[arg(long, short, global = true)]
     verbose: bool,
+
+    /// When to use colors
+    #[arg(long, global = true, default_value = "auto")]
+    color: ColorChoice,
 }
 
 #[derive(Subcommand)]
@@ -155,6 +160,16 @@ enum HistoryAnalysis {
     All,
 }
 
+#[derive(Clone, PartialEq, Eq, ValueEnum)]
+enum ColorChoice {
+    /// Auto-detect based on terminal
+    Auto,
+    /// Always use colors
+    Always,
+    /// Never use colors
+    Never,
+}
+
 fn read_diff_input(file: &Option<PathBuf>) -> Result<String> {
     match file {
         Some(path) => {
@@ -214,9 +229,17 @@ impl CheckResult {
             _ => "~",
         }
     }
+
+    fn colored_symbol(&self) -> String {
+        match self.status {
+            "pass" => "\x1b[32m\u{2713}\x1b[0m".into(),
+            "fail" => "\x1b[31m\u{2717}\x1b[0m".into(),
+            _ => "\x1b[33m~\x1b[0m".into(),
+        }
+    }
 }
 
-fn run_doctor(config: &argus_core::ArgusConfig, format: OutputFormat) -> Result<()> {
+fn run_doctor(config: &argus_core::ArgusConfig, format: OutputFormat, use_color: bool) -> Result<()> {
     let mut checks: Vec<CheckResult> = Vec::new();
 
     // 1. Git repository
@@ -388,7 +411,11 @@ fn run_doctor(config: &argus_core::ArgusConfig, format: OutputFormat) -> Result<
             println!("Argus v{version} — Environment Check\n");
 
             for check in &checks {
-                let sym = check.symbol();
+                let sym = if use_color {
+                    check.colored_symbol()
+                } else {
+                    check.symbol().to_string()
+                };
                 // Pad the name for alignment
                 let label = check.name.replace('_', " ");
                 println!("  {sym} {label:<20} {}", check.detail);
@@ -458,6 +485,14 @@ async fn main() -> Result<()> {
             } else {
                 argus_core::ArgusConfig::default()
             }
+        }
+    };
+
+    let use_color = match cli.color {
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+        ColorChoice::Auto => {
+            std::io::stdout().is_terminal() && std::env::var("NO_COLOR").is_err()
         }
     };
 
@@ -971,7 +1006,7 @@ async fn main() -> Result<()> {
             println!("Created .argus.toml with default configuration");
         }
         Command::Doctor => {
-            run_doctor(&config, cli.format)?;
+            run_doctor(&config, cli.format, use_color)?;
         }
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
