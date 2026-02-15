@@ -137,6 +137,7 @@ impl Default for LlmConfig {
 /// assert_eq!(config.max_comments, 5);
 /// assert!(!config.include_suggestions);
 /// assert_eq!(config.max_diff_tokens, 4000);
+/// assert!(config.cross_file);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewConfig {
@@ -161,6 +162,9 @@ pub struct ReviewConfig {
     /// Include suggestion-level comments (default: false).
     #[serde(default)]
     pub include_suggestions: bool,
+    /// Group related files for cross-file analysis when splitting diffs (default: true).
+    #[serde(default = "default_cross_file")]
+    pub cross_file: bool,
 }
 
 fn default_max_comments() -> usize {
@@ -179,6 +183,10 @@ fn default_max_diff_tokens() -> usize {
     4000
 }
 
+fn default_cross_file() -> bool {
+    true
+}
+
 impl Default for ReviewConfig {
     fn default() -> Self {
         Self {
@@ -189,6 +197,7 @@ impl Default for ReviewConfig {
             skip_extensions: Vec::new(),
             max_diff_tokens: default_max_diff_tokens(),
             include_suggestions: false,
+            cross_file: default_cross_file(),
         }
     }
 }

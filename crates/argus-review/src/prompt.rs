@@ -66,12 +66,16 @@ pub fn build_system_prompt(config: &ReviewConfig) -> String {
 
 /// Build the user prompt containing the diff to review.
 ///
+/// When `cross_file_review` is `true`, appends an instruction block asking
+/// the LLM to look for cross-file issues such as API mismatches and
+/// missing updates.
+///
 /// # Examples
 ///
 /// ```
 /// use argus_review::prompt::build_review_prompt;
 ///
-/// let prompt = build_review_prompt("+new line", None, None, None, None);
+/// let prompt = build_review_prompt("+new line", None, None, None, None, false);
 /// assert!(prompt.contains("+new line"));
 /// ```
 pub fn build_review_prompt(
@@ -80,6 +84,7 @@ pub fn build_review_prompt(
     related_code: Option<&str>,
     history_context: Option<&str>,
     file_context: Option<&str>,
+    cross_file_review: bool,
 ) -> String {
     let mut prompt = String::new();
 
@@ -106,6 +111,16 @@ pub fn build_review_prompt(
     ));
     if let Some(ctx) = file_context {
         prompt.push_str(&format!("\nAdditional context:\n{ctx}\n"));
+    }
+    if cross_file_review {
+        prompt.push_str(
+            "\nIMPORTANT: These files are part of the same change and may be related.\n\
+             Look for cross-file issues:\n\
+             - Function/type signature changes not reflected in callers\n\
+             - Inconsistent error handling across files\n\
+             - Missing updates in related files\n\
+             - API contract violations between modules\n",
+        );
     }
     prompt
 }
@@ -244,20 +259,22 @@ mod tests {
 
     #[test]
     fn review_prompt_includes_diff() {
-        let prompt = build_review_prompt("+added line", None, None, None, None);
+        let prompt = build_review_prompt("+added line", None, None, None, None, false);
         assert!(prompt.contains("+added line"));
         assert!(prompt.contains("```diff"));
     }
 
     #[test]
     fn review_prompt_includes_context() {
-        let prompt = build_review_prompt("+x", None, None, None, Some("This is an auth module"));
+        let prompt =
+            build_review_prompt("+x", None, None, None, Some("This is an auth module"), false);
         assert!(prompt.contains("auth module"));
     }
 
     #[test]
     fn review_prompt_includes_related_code() {
-        let prompt = build_review_prompt("+x", None, Some("fn authenticate() { }"), None, None);
+        let prompt =
+            build_review_prompt("+x", None, Some("fn authenticate() { }"), None, None, false);
         assert!(prompt.contains("authenticate"));
         assert!(prompt.contains("related code"));
     }
@@ -270,9 +287,23 @@ mod tests {
             None,
             Some("- src/auth.rs: 47 revisions, HOTSPOT\n"),
             None,
+            false,
         );
         assert!(prompt.contains("Git History Context"));
         assert!(prompt.contains("47 revisions"));
+    }
+
+    #[test]
+    fn review_prompt_includes_cross_file_instruction() {
+        let prompt = build_review_prompt("+x", None, None, None, None, true);
+        assert!(prompt.contains("cross-file issues"));
+        assert!(prompt.contains("API contract violations"));
+    }
+
+    #[test]
+    fn review_prompt_omits_cross_file_when_disabled() {
+        let prompt = build_review_prompt("+x", None, None, None, None, false);
+        assert!(!prompt.contains("cross-file issues"));
     }
 
     #[test]
