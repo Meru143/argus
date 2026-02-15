@@ -118,6 +118,10 @@ impl HybridSearch {
     /// # }
     /// ```
     pub async fn index_repo(&self, root: &Path) -> Result<IndexStats, ArgusError> {
+        // Record embedding dimensions for consistency checking
+        self.index
+            .set_dimensions(self.embedding_client.default_dimensions())?;
+
         let files = argus_repomap::walker::walk_repo(root)?;
         let mut all_chunks = Vec::new();
 
@@ -171,6 +175,10 @@ impl HybridSearch {
     /// # }
     /// ```
     pub async fn reindex_repo(&self, root: &Path) -> Result<IndexStats, ArgusError> {
+        // Verify dimensions match existing index
+        self.index
+            .set_dimensions(self.embedding_client.default_dimensions())?;
+
         let files = argus_repomap::walker::walk_repo(root)?;
         let existing_paths = self.index.indexed_files()?;
 
