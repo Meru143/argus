@@ -71,13 +71,14 @@ pub fn build_system_prompt(config: &ReviewConfig) -> String {
 /// ```
 /// use argus_review::prompt::build_review_prompt;
 ///
-/// let prompt = build_review_prompt("+new line", None, None, None);
+/// let prompt = build_review_prompt("+new line", None, None, None, None);
 /// assert!(prompt.contains("+new line"));
 /// ```
 pub fn build_review_prompt(
     diff: &str,
     repo_map: Option<&str>,
     related_code: Option<&str>,
+    history_context: Option<&str>,
     file_context: Option<&str>,
 ) -> String {
     let mut prompt = String::new();
@@ -91,6 +92,12 @@ pub fn build_review_prompt(
     if let Some(code) = related_code {
         prompt.push_str("Here is related code from the codebase that may be relevant:\n\n");
         prompt.push_str(code);
+        prompt.push_str("\n\n");
+    }
+
+    if let Some(history) = history_context {
+        prompt.push_str("## Git History Context\n");
+        prompt.push_str(history);
         prompt.push_str("\n\n");
     }
 
@@ -237,22 +244,35 @@ mod tests {
 
     #[test]
     fn review_prompt_includes_diff() {
-        let prompt = build_review_prompt("+added line", None, None, None);
+        let prompt = build_review_prompt("+added line", None, None, None, None);
         assert!(prompt.contains("+added line"));
         assert!(prompt.contains("```diff"));
     }
 
     #[test]
     fn review_prompt_includes_context() {
-        let prompt = build_review_prompt("+x", None, None, Some("This is an auth module"));
+        let prompt = build_review_prompt("+x", None, None, None, Some("This is an auth module"));
         assert!(prompt.contains("auth module"));
     }
 
     #[test]
     fn review_prompt_includes_related_code() {
-        let prompt = build_review_prompt("+x", None, Some("fn authenticate() { }"), None);
+        let prompt = build_review_prompt("+x", None, Some("fn authenticate() { }"), None, None);
         assert!(prompt.contains("authenticate"));
         assert!(prompt.contains("related code"));
+    }
+
+    #[test]
+    fn review_prompt_includes_history_context() {
+        let prompt = build_review_prompt(
+            "+x",
+            None,
+            None,
+            Some("- src/auth.rs: 47 revisions, HOTSPOT\n"),
+            None,
+        );
+        assert!(prompt.contains("Git History Context"));
+        assert!(prompt.contains("47 revisions"));
     }
 
     #[test]
