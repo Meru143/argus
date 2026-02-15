@@ -162,6 +162,11 @@ impl CodeIndex {
         self.conn
             .execute_batch(
                 "
+                CREATE TABLE IF NOT EXISTS metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS files (
                     path TEXT PRIMARY KEY,
                     content_hash TEXT NOT NULL,
@@ -209,6 +214,68 @@ impl CodeIndex {
             )
             .map_err(|e| ArgusError::Database(format!("failed to create schema: {e}")))?;
 
+        Ok(())
+    }
+
+    /// Store embedding dimensions in the metadata table.
+    ///
+    /// If dimensions are already stored and match, this is a no-op.
+    /// If they don't match, returns an error suggesting re-indexing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArgusError::Database`] if dimensions conflict with
+    /// an existing index.
+    pub fn set_dimensions(&self, dimensions: usize) -> Result<(), ArgusError> {
+        let existing = self.get_metadata("embedding_dimensions")?;
+
+        if let Some(stored) = existing {
+            let stored_dims: usize = stored.parse().unwrap_or(0);
+            if stored_dims != dimensions {
+                return Err(ArgusError::Database(format!(
+                    "Index was created with {stored_dims} dimensions but config specifies {dimensions}. \
+                     Re-index with --index to rebuild."
+                )));
+            }
+            return Ok(());
+        }
+
+        self.set_metadata("embedding_dimensions", &dimensions.to_string())
+    }
+
+    /// Get embedding dimensions stored in metadata, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArgusError::Database`] on query failure.
+    pub fn get_dimensions(&self) -> Result<Option<usize>, ArgusError> {
+        let value = self.get_metadata("embedding_dimensions")?;
+        Ok(value.and_then(|v| v.parse().ok()))
+    }
+
+    fn get_metadata(&self, key: &str) -> Result<Option<String>, ArgusError> {
+        let result = self.conn.query_row(
+            "SELECT value FROM metadata WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        );
+
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(ArgusError::Database(format!(
+                "failed to get metadata '{key}': {e}"
+            ))),
+        }
+    }
+
+    fn set_metadata(&self, key: &str, value: &str) -> Result<(), ArgusError> {
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                params![key, value],
+            )
+            .map_err(|e| ArgusError::Database(format!("failed to set metadata '{key}': {e}")))?;
         Ok(())
     }
 
@@ -819,5 +886,31 @@ mod tests {
         let bytes = floats_to_bytes(&original);
         let recovered = bytes_to_floats(&bytes);
         assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn set_dimensions_stores_and_validates() {
+        let index = CodeIndex::in_memory().unwrap();
+
+        // First set succeeds
+        index.set_dimensions(1024).unwrap();
+        assert_eq!(index.get_dimensions().unwrap(), Some(1024));
+
+        // Same dimensions is a no-op
+        index.set_dimensions(1024).unwrap();
+
+        // Different dimensions returns error
+        let result = index.set_dimensions(768);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("1024"));
+        assert!(err.contains("768"));
+        assert!(err.contains("Re-index"));
+    }
+
+    #[test]
+    fn get_dimensions_returns_none_for_new_index() {
+        let index = CodeIndex::in_memory().unwrap();
+        assert_eq!(index.get_dimensions().unwrap(), None);
     }
 }
