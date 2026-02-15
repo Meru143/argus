@@ -31,6 +31,8 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 toml = "0.8"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+octocrab = "0.44"
 
 [package]
 name = "argus"
@@ -48,3 +50,4 @@ argus-mcp = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
+serde_json = { workspace = true }
