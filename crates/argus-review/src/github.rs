@@ -97,6 +97,8 @@ impl GitHubClient {
     /// Post review comments to a pull request.
     ///
     /// Creates a single review with all comments using the GitHub PR Review API.
+    /// The review event is determined by the highest severity comment:
+    /// Bug -> REQUEST_CHANGES, Warning/Suggestion/Info -> COMMENT.
     ///
     /// # Errors
     ///
@@ -107,6 +109,7 @@ impl GitHubClient {
         repo: &str,
         pr_number: u64,
         comments: &[ReviewComment],
+        summary: &str,
     ) -> Result<(), ArgusError> {
         let review_comments: Vec<serde_json::Value> = comments
             .iter()
@@ -139,10 +142,17 @@ impl GitHubClient {
             })
             .collect();
 
+        let has_bugs = comments.iter().any(|c| c.severity == Severity::Bug);
+        let event = if has_bugs {
+            "REQUEST_CHANGES"
+        } else {
+            "COMMENT"
+        };
+
         let route = format!("/repos/{owner}/{repo}/pulls/{pr_number}/reviews");
         let body = serde_json::json!({
-            "event": "COMMENT",
-            "body": "Argus Code Review",
+            "event": event,
+            "body": summary,
             "comments": review_comments,
         });
 
