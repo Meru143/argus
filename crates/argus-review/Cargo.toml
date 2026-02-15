@@ -9,3 +9,8 @@ argus-repomap = { workspace = true }
 argus-difflens = { workspace = true }
 argus-codelens = { workspace = true }
 argus-gitpulse = { workspace = true }
+reqwest = { workspace = true }
+octocrab = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
