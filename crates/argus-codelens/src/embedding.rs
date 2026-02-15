@@ -192,11 +192,15 @@ impl EmbeddingClient {
                 ))
             })?;
 
-        let model = if config.model == EmbeddingConfig::default().model
-            && provider != Provider::Voyage
-        {
-            // Config has the default Voyage model but provider changed — use provider default
-            default_model(provider).to_string()
+        let model = if !is_model_compatible(&config.model, provider) {
+            let provider_default = default_model(provider);
+            eprintln!(
+                "warning: model '{}' is not compatible with {} provider, switching to '{}'",
+                config.model,
+                config.provider,
+                provider_default,
+            );
+            provider_default.to_string()
         } else {
             config.model.clone()
         };
@@ -471,6 +475,18 @@ fn default_dimensions(provider: Provider) -> usize {
     }
 }
 
+/// Check if a model name is compatible with the given provider.
+///
+/// Heuristic: Voyage models start with "voyage", Gemini and OpenAI models
+/// contain "embedding".
+fn is_model_compatible(model: &str, provider: Provider) -> bool {
+    match provider {
+        Provider::Voyage => model.starts_with("voyage"),
+        Provider::Gemini => model.contains("embedding"),
+        Provider::OpenAi => model.contains("embedding"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -740,5 +756,43 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("cohere"));
+    }
+
+    #[test]
+    fn gemini_model_auto_corrects_when_switching_to_voyage() {
+        // Bug 1: switching Gemini→Voyage would send "text-embedding-004" to Voyage API
+        let config = EmbeddingConfig {
+            provider: "voyage".into(),
+            api_key: Some("test-key".into()),
+            model: "text-embedding-004".into(),
+            dimensions: 768,
+        };
+        let client = EmbeddingClient::with_config(&config).unwrap();
+        assert_eq!(client.model(), "voyage-code-3");
+    }
+
+    #[test]
+    fn openai_model_auto_corrects_when_switching_to_voyage() {
+        let config = EmbeddingConfig {
+            provider: "voyage".into(),
+            api_key: Some("test-key".into()),
+            model: "text-embedding-3-small".into(),
+            dimensions: 1536,
+        };
+        let client = EmbeddingClient::with_config(&config).unwrap();
+        assert_eq!(client.model(), "voyage-code-3");
+    }
+
+    #[test]
+    fn model_compatibility_check() {
+        assert!(is_model_compatible("voyage-code-3", Provider::Voyage));
+        assert!(is_model_compatible("voyage-3", Provider::Voyage));
+        assert!(!is_model_compatible("text-embedding-004", Provider::Voyage));
+
+        assert!(is_model_compatible("text-embedding-004", Provider::Gemini));
+        assert!(!is_model_compatible("voyage-code-3", Provider::Gemini));
+
+        assert!(is_model_compatible("text-embedding-3-small", Provider::OpenAi));
+        assert!(!is_model_compatible("voyage-code-3", Provider::OpenAi));
     }
 }
