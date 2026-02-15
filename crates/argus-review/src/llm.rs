@@ -311,18 +311,26 @@ impl LlmClient {
             .await
             .map_err(|e| ArgusError::Llm(format!("failed to parse Anthropic response: {e}")))?;
 
-        let content = response_body
+        // Iterate content blocks to find the first "text" type, skipping "thinking" blocks
+        let content_array = response_body
             .get("content")
-            .and_then(|c| c.get(0))
-            .and_then(|c| c.get("text"))
-            .and_then(|t| t.as_str())
+            .and_then(|c| c.as_array())
             .ok_or_else(|| {
                 ArgusError::Llm(format!(
                     "unexpected Anthropic response structure: {response_body}"
                 ))
             })?;
 
-        Ok(content.to_string())
+        let text = content_array
+            .iter()
+            .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .and_then(|block| block.get("text"))
+            .and_then(|t| t.as_str())
+            .ok_or_else(|| {
+                ArgusError::Llm("No text content in Anthropic response".into())
+            })?;
+
+        Ok(text.to_string())
     }
 }
 
@@ -554,12 +562,82 @@ mod tests {
 
         let content = response
             .get("content")
-            .and_then(|c| c.get(0))
-            .and_then(|c| c.get("text"))
+            .and_then(|c| c.as_array())
+            .unwrap()
+            .iter()
+            .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .and_then(|block| block.get("text"))
             .and_then(|t| t.as_str())
             .unwrap();
 
         assert_eq!(content, "{\"comments\":[]}");
+    }
+
+    #[test]
+    fn anthropic_thinking_response_parsing() {
+        let response = serde_json::json!({
+            "content": [
+                {"type": "thinking", "thinking": "Let me analyze this code..."},
+                {"type": "text", "text": "{\"comments\":[{\"file\":\"a.rs\"}]}"}
+            ],
+            "model": "claude-sonnet-4-5-thinking",
+            "role": "assistant",
+        });
+
+        let content = response
+            .get("content")
+            .and_then(|c| c.as_array())
+            .unwrap()
+            .iter()
+            .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .and_then(|block| block.get("text"))
+            .and_then(|t| t.as_str())
+            .unwrap();
+
+        assert_eq!(content, "{\"comments\":[{\"file\":\"a.rs\"}]}");
+    }
+
+    #[test]
+    fn anthropic_multiple_thinking_blocks() {
+        let response = serde_json::json!({
+            "content": [
+                {"type": "thinking", "thinking": "First thought..."},
+                {"type": "thinking", "thinking": "Second thought..."},
+                {"type": "text", "text": "{\"comments\":[]}"}
+            ],
+        });
+
+        let content = response
+            .get("content")
+            .and_then(|c| c.as_array())
+            .unwrap()
+            .iter()
+            .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .and_then(|block| block.get("text"))
+            .and_then(|t| t.as_str())
+            .unwrap();
+
+        assert_eq!(content, "{\"comments\":[]}");
+    }
+
+    #[test]
+    fn anthropic_no_text_block_errors() {
+        let response = serde_json::json!({
+            "content": [
+                {"type": "thinking", "thinking": "Just thinking..."}
+            ],
+        });
+
+        let result: Option<&str> = response
+            .get("content")
+            .and_then(|c| c.as_array())
+            .unwrap()
+            .iter()
+            .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .and_then(|block| block.get("text"))
+            .and_then(|t| t.as_str());
+
+        assert!(result.is_none());
     }
 
     #[test]
