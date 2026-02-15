@@ -71,12 +71,13 @@ pub fn build_system_prompt(config: &ReviewConfig) -> String {
 /// ```
 /// use argus_review::prompt::build_review_prompt;
 ///
-/// let prompt = build_review_prompt("+new line", None, None);
+/// let prompt = build_review_prompt("+new line", None, None, None);
 /// assert!(prompt.contains("+new line"));
 /// ```
 pub fn build_review_prompt(
     diff: &str,
     repo_map: Option<&str>,
+    related_code: Option<&str>,
     file_context: Option<&str>,
 ) -> String {
     let mut prompt = String::new();
@@ -85,6 +86,12 @@ pub fn build_review_prompt(
         prompt.push_str("Here is the codebase structure for context:\n\n```\n");
         prompt.push_str(map);
         prompt.push_str("```\n\n");
+    }
+
+    if let Some(code) = related_code {
+        prompt.push_str("Here is related code from the codebase that may be relevant:\n\n");
+        prompt.push_str(code);
+        prompt.push_str("\n\n");
     }
 
     prompt.push_str(&format!(
@@ -230,15 +237,22 @@ mod tests {
 
     #[test]
     fn review_prompt_includes_diff() {
-        let prompt = build_review_prompt("+added line", None, None);
+        let prompt = build_review_prompt("+added line", None, None, None);
         assert!(prompt.contains("+added line"));
         assert!(prompt.contains("```diff"));
     }
 
     #[test]
     fn review_prompt_includes_context() {
-        let prompt = build_review_prompt("+x", None, Some("This is an auth module"));
+        let prompt = build_review_prompt("+x", None, None, Some("This is an auth module"));
         assert!(prompt.contains("auth module"));
+    }
+
+    #[test]
+    fn review_prompt_includes_related_code() {
+        let prompt = build_review_prompt("+x", None, Some("fn authenticate() { }"), None);
+        assert!(prompt.contains("authenticate"));
+        assert!(prompt.contains("related code"));
     }
 
     #[test]

@@ -3,3 +3,8 @@
 //! Provides local-first semantic search using AST-aware chunking (by
 //! function/method), vector embeddings, and hybrid retrieval combining
 //! vector similarity with keyword search via Reciprocal Rank Fusion.
+
+pub mod chunker;
+pub mod embedding;
+pub mod search;
+pub mod store;

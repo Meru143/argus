@@ -26,6 +26,9 @@ pub struct ArgusConfig {
     /// Review behavior settings.
     #[serde(default)]
     pub review: ReviewConfig,
+    /// Embedding provider settings for semantic search.
+    #[serde(default)]
+    pub embedding: EmbeddingConfig,
     /// Per-path overrides for monorepo support.
     #[serde(default)]
     pub paths: HashMap<String, PathConfig>,
@@ -212,6 +215,56 @@ pub struct PathConfig {
     pub context_boundary: bool,
 }
 
+/// Configuration for embedding providers used by semantic search.
+///
+/// # Examples
+///
+/// ```
+/// use argus_core::EmbeddingConfig;
+///
+/// let config = EmbeddingConfig::default();
+/// assert_eq!(config.provider, "voyage");
+/// assert_eq!(config.model, "voyage-code-3");
+/// assert_eq!(config.dimensions, 1024);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingConfig {
+    /// Embedding provider (default: `"voyage"`).
+    #[serde(default = "default_embedding_provider")]
+    pub provider: String,
+    /// API key for the embedding provider.
+    pub api_key: Option<String>,
+    /// Model name (default: `"voyage-code-3"`).
+    #[serde(default = "default_embedding_model")]
+    pub model: String,
+    /// Embedding dimensions (default: 1024).
+    #[serde(default = "default_embedding_dimensions")]
+    pub dimensions: usize,
+}
+
+fn default_embedding_provider() -> String {
+    "voyage".into()
+}
+
+fn default_embedding_model() -> String {
+    "voyage-code-3".into()
+}
+
+fn default_embedding_dimensions() -> usize {
+    1024
+}
+
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_embedding_provider(),
+            api_key: None,
+            model: default_embedding_model(),
+            dimensions: default_embedding_dimensions(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,6 +280,9 @@ mod tests {
         assert!(config.review.skip_extensions.is_empty());
         assert_eq!(config.llm.provider, "openai");
         assert_eq!(config.llm.model, "gpt-4o");
+        assert_eq!(config.embedding.provider, "voyage");
+        assert_eq!(config.embedding.model, "voyage-code-3");
+        assert_eq!(config.embedding.dimensions, 1024);
         assert!(config.paths.is_empty());
     }
 
