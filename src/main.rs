@@ -55,7 +55,26 @@ enum Command {
         file: Option<PathBuf>,
     },
     /// Search the codebase semantically
-    Search,
+    Search {
+        /// Search query (omit to just index or reindex)
+        query: Option<String>,
+
+        /// Repository path (default: current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Maximum results to return (default: 10)
+        #[arg(long, default_value = "10")]
+        limit: usize,
+
+        /// Index the repository before searching
+        #[arg(long)]
+        index: bool,
+
+        /// Re-index only changed files
+        #[arg(long)]
+        reindex: bool,
+    },
     /// Analyze git history for hotspots and patterns
     History,
     /// Run an AI-powered code review
@@ -144,8 +163,94 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Command::Search => {
-            anyhow::bail!("search subcommand not yet implemented")
+        Command::Search {
+            ref query,
+            ref path,
+            limit,
+            index,
+            reindex,
+        } => {
+            let index_path = path.join(".argus/index.db");
+
+            let embedding_client =
+                argus_codelens::embedding::EmbeddingClient::with_config(&config.embedding)?;
+
+            let code_index = argus_codelens::store::CodeIndex::open(&index_path)?;
+            let search = argus_codelens::search::HybridSearch::new(code_index, embedding_client);
+
+            if index {
+                eprintln!("Indexing repository at {} ...", path.display());
+                let stats = search.index_repo(path).await?;
+                eprintln!(
+                    "Indexed {} chunks from {} files ({} bytes)",
+                    stats.total_chunks, stats.total_files, stats.index_size_bytes,
+                );
+            }
+
+            if reindex {
+                eprintln!("Re-indexing changed files at {} ...", path.display());
+                let stats = search.reindex_repo(path).await?;
+                eprintln!(
+                    "Index now has {} chunks from {} files ({} bytes)",
+                    stats.total_chunks, stats.total_files, stats.index_size_bytes,
+                );
+            }
+
+            if let Some(q) = query {
+                let results = search.search(q, limit).await?;
+
+                match cli.format {
+                    OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&results)?);
+                    }
+                    OutputFormat::Markdown => {
+                        if results.is_empty() {
+                            println!("No results found.");
+                        } else {
+                            println!("# Search Results\n");
+                            for (i, r) in results.iter().enumerate() {
+                                let lang = r.language.as_deref().unwrap_or("text");
+                                println!(
+                                    "## {}. `{}:{}–{}` (score: {:.4})\n\n```{lang}\n{}\n```\n",
+                                    i + 1,
+                                    r.file_path.display(),
+                                    r.line_start,
+                                    r.line_end,
+                                    r.score,
+                                    r.snippet,
+                                );
+                            }
+                        }
+                    }
+                    OutputFormat::Text => {
+                        if results.is_empty() {
+                            println!("No results found.");
+                        } else {
+                            for (i, r) in results.iter().enumerate() {
+                                println!(
+                                    "{}. {}:{}–{} (score: {:.4})",
+                                    i + 1,
+                                    r.file_path.display(),
+                                    r.line_start,
+                                    r.line_end,
+                                    r.score,
+                                );
+                                // Show a snippet preview (first 3 lines)
+                                let preview: String = r
+                                    .snippet
+                                    .lines()
+                                    .take(3)
+                                    .map(|l| format!("   {l}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                println!("{preview}\n");
+                            }
+                        }
+                    }
+                }
+            } else if !index && !reindex {
+                anyhow::bail!("provide a search query, or use --index / --reindex");
+            }
         }
         Command::History => {
             anyhow::bail!("history subcommand not yet implemented")

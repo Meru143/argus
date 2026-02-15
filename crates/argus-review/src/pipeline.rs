@@ -159,6 +159,18 @@ impl ReviewPipeline {
             None
         };
 
+        // Search for related code context if an index exists
+        let related_code = if let Some(root) = repo_path {
+            let index_path = root.join(".argus/index.db");
+            if index_path.exists() {
+                build_related_code_context(&kept_diffs, &index_path)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // 2. Decide whether to split or send as one call
         let diff_text = diffs_to_text(&kept_diffs);
         let total_tokens = estimate_tokens(&diff_text);
@@ -171,7 +183,12 @@ impl ReviewPipeline {
             // Split into per-file LLM calls
             for diff in &kept_diffs {
                 let file_diff_text = diffs_to_text(std::slice::from_ref(diff));
-                let user = prompt::build_review_prompt(&file_diff_text, repo_map.as_deref(), None);
+                let user = prompt::build_review_prompt(
+                    &file_diff_text,
+                    repo_map.as_deref(),
+                    related_code.as_deref(),
+                    None,
+                );
 
                 let messages = vec![
                     ChatMessage {
@@ -191,7 +208,12 @@ impl ReviewPipeline {
             }
         } else {
             // Single LLM call
-            let user = prompt::build_review_prompt(&diff_text, repo_map.as_deref(), None);
+            let user = prompt::build_review_prompt(
+                &diff_text,
+                repo_map.as_deref(),
+                related_code.as_deref(),
+                None,
+            );
 
             let messages = vec![
                 ChatMessage {
@@ -314,6 +336,69 @@ fn severity_rank(s: Severity) -> u8 {
         Severity::Warning => 1,
         Severity::Suggestion => 2,
         Severity::Info => 3,
+    }
+}
+
+/// Build related code context from the search index for the given diffs.
+///
+/// For each file in the diff, performs a keyword search for its entity names.
+/// Returns the top 3 results formatted for inclusion in the review prompt.
+fn build_related_code_context(diffs: &[FileDiff], index_path: &std::path::Path) -> Option<String> {
+    let index = match argus_codelens::store::CodeIndex::open(index_path) {
+        Ok(idx) => idx,
+        Err(_) => return None,
+    };
+
+    let mut context_parts = Vec::new();
+
+    for diff in diffs {
+        let file_name = diff
+            .new_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        if file_name.is_empty() {
+            continue;
+        }
+
+        let results = match index.keyword_search(file_name, 3) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        for hit in &results {
+            // Don't include the file being reviewed as "related code"
+            if hit.chunk.file_path == diff.new_path {
+                continue;
+            }
+            context_parts.push(format!(
+                "// Related: {} ({}:{})\n{}",
+                hit.chunk.entity_name,
+                hit.chunk.file_path.display(),
+                hit.chunk.start_line,
+                hit.chunk.content,
+            ));
+        }
+    }
+
+    if context_parts.is_empty() {
+        return None;
+    }
+
+    // Limit total context size
+    let mut output = String::new();
+    for part in context_parts.iter().take(3) {
+        if output.len() + part.len() > 4000 {
+            break;
+        }
+        output.push_str(part);
+        output.push_str("\n\n");
+    }
+
+    if output.is_empty() {
+        None
+    } else {
+        Some(output)
     }
 }
 

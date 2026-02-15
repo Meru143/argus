@@ -46,6 +46,14 @@ pub enum ArgusError {
     /// A required file was not found.
     #[error("file not found: {}", .0.display())]
     FileNotFound(PathBuf),
+
+    /// Embedding API error.
+    #[error("embedding error: {0}")]
+    Embedding(String),
+
+    /// Database operation failure.
+    #[error("database error: {0}")]
+    Database(String),
 }
 
 #[cfg(test)]

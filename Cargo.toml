@@ -42,6 +42,8 @@ tree-sitter-go = "0.23"
 petgraph = "0.7"
 ignore = "0.4"
 glob = "0.3"
+rusqlite = { version = "0.32", features = ["bundled", "vtab"] }
+sha2 = "0.10"
 
 [package]
 name = "argus"
