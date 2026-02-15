@@ -17,12 +17,10 @@ intelligence, and LLM-powered reviews to catch what your copilot misses.
 
 ## Quick Start
 
-### Install via npm (easiest)
+### Install via npm
 
 ```bash
 npx argus-ai --help
-npx argus-ai map --path .
-npx argus-ai review --file my.diff
 ```
 
 Or install globally:
@@ -31,22 +29,12 @@ Or install globally:
 npm install -g argus-ai
 ```
 
-### Install from source
+### Build from source
 
 ```bash
-cargo install --git https://github.com/Meru143/argus
-```
-
-### Download pre-built binary
-
-```bash
-# Linux (x86_64)
-curl -sSL https://github.com/Meru143/argus/releases/latest/download/argus-x86_64-unknown-linux-gnu.tar.gz | tar xz
-sudo mv argus /usr/local/bin/
-
-# macOS (Apple Silicon)
-curl -sSL https://github.com/Meru143/argus/releases/latest/download/argus-aarch64-apple-darwin.tar.gz | tar xz
-sudo mv argus /usr/local/bin/
+git clone https://github.com/Meru143/argus.git
+cd argus
+cargo install --path .
 ```
 
 ### Initialize configuration
