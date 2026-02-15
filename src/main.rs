@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 
-use argus_core::OutputFormat;
+use argus_core::{OutputFormat, Severity};
 
 #[derive(Parser)]
 #[command(
@@ -117,6 +117,9 @@ enum Command {
         /// Include suggestion-level comments (default: only bug+warning)
         #[arg(long)]
         include_suggestions: bool,
+        /// Exit with non-zero code if findings of this severity or higher are found
+        #[arg(long)]
+        fail_on: Option<Severity>,
     },
     /// Start the MCP server for IDE integration
     Mcp {
@@ -124,6 +127,8 @@ enum Command {
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
+    /// Create a default .argus.toml configuration file
+    Init,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -152,6 +157,29 @@ fn read_diff_input(file: &Option<PathBuf>) -> Result<String> {
         }
     }
 }
+
+const DEFAULT_CONFIG: &str = r#"# Argus Configuration
+# See: https://github.com/Meru143/argus
+
+[review]
+# LLM provider (OpenAI-compatible endpoint)
+# api_base = "https://api.openai.com/v1"
+# model = "gpt-4o"
+# max_findings = 5
+
+[review.noise]
+# skip_patterns = ["*.lock", "*.min.js", "vendor/**"]
+# min_confidence = 90
+# include_suggestions = false
+
+[embedding]
+# provider = "voyage"
+# model = "voyage-code-3"
+
+[history]
+# since_days = 180
+# max_files_per_commit = 25
+"#;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -499,6 +527,7 @@ async fn main() -> Result<()> {
             ref repo,
             ref skip_pattern,
             include_suggestions,
+            fail_on,
         } => {
             let diff_input = if let Some(pr_ref) = pr {
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
@@ -580,14 +609,37 @@ async fn main() -> Result<()> {
                 };
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
                 let github = argus_review::github::GitHubClient::new(None)?;
+                let summary = format!(
+                    "Argus Code Review: {} comments ({} files reviewed)",
+                    result.comments.len(),
+                    result.stats.files_reviewed,
+                );
                 github
-                    .post_review(&owner, &repo, pr_number, &result.comments)
+                    .post_review(&owner, &repo, pr_number, &result.comments, &summary)
                     .await?;
                 eprintln!("Posted {} comments to {pr_ref}", result.comments.len());
+            }
+
+            if let Some(threshold) = fail_on {
+                let has_findings = result
+                    .comments
+                    .iter()
+                    .any(|c| c.severity.meets_threshold(threshold));
+                if has_findings {
+                    std::process::exit(1);
+                }
             }
         }
         Command::Mcp { ref path } => {
             argus_mcp::server::run_server(path.clone()).await?;
+        }
+        Command::Init => {
+            let path = std::path::Path::new(".argus.toml");
+            if path.exists() {
+                anyhow::bail!(".argus.toml already exists");
+            }
+            std::fs::write(path, DEFAULT_CONFIG)?;
+            println!("Created .argus.toml with default configuration");
         }
     }
 
