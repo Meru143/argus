@@ -240,6 +240,9 @@ async fn main() -> Result<()> {
             print!("{output}");
         }
         Command::Diff { ref file } => {
+            if cli.format == OutputFormat::Sarif {
+                anyhow::bail!("SARIF output is only supported for the review subcommand.");
+            }
             let input = read_diff_input(file)?;
             let diffs = argus_difflens::parser::parse_unified_diff(&input)?;
             let report = argus_difflens::risk::compute_risk(&diffs);
@@ -254,6 +257,7 @@ async fn main() -> Result<()> {
                 OutputFormat::Text => {
                     print!("{report}");
                 }
+                OutputFormat::Sarif => unreachable!(),
             }
         }
         Command::Search {
@@ -263,6 +267,9 @@ async fn main() -> Result<()> {
             index,
             reindex,
         } => {
+            if cli.format == OutputFormat::Sarif {
+                anyhow::bail!("SARIF output is only supported for the review subcommand.");
+            }
             let index_path = path.join(".argus/index.db");
 
             let embedding_client =
@@ -340,6 +347,7 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
+                    OutputFormat::Sarif => unreachable!(),
                 }
             } else if !index && !reindex {
                 anyhow::bail!("provide a search query, or use --index / --reindex");
@@ -352,6 +360,9 @@ async fn main() -> Result<()> {
             limit,
             min_coupling,
         } => {
+            if cli.format == OutputFormat::Sarif {
+                anyhow::bail!("SARIF output is only supported for the review subcommand.");
+            }
             let options = argus_gitpulse::mining::MiningOptions {
                 since_days: since,
                 ..argus_gitpulse::mining::MiningOptions::default()
@@ -547,6 +558,7 @@ async fn main() -> Result<()> {
                         println!();
                     }
                 }
+                OutputFormat::Sarif => unreachable!(),
             }
         }
         Command::Review {
@@ -634,6 +646,10 @@ async fn main() -> Result<()> {
                 }
                 OutputFormat::Markdown => {
                     print!("{}", result.to_markdown());
+                }
+                OutputFormat::Sarif => {
+                    let sarif = argus_review::sarif::to_sarif(&result);
+                    println!("{}", serde_json::to_string_pretty(&sarif)?);
                 }
                 OutputFormat::Text => {
                     print!("{result}");
