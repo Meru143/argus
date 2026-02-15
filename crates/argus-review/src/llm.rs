@@ -184,6 +184,12 @@ impl LlmClient {
     }
 
     async fn chat_openai(&self, messages: Vec<ChatMessage>) -> Result<String, ArgusError> {
+        let api_key = self.api_key.as_deref().ok_or_else(|| {
+            ArgusError::Llm(
+                "OpenAI API key required. Set it in .argus.toml or export OPENAI_API_KEY".into(),
+            )
+        })?;
+
         let base_url = self
             .base_url
             .as_deref()
@@ -198,9 +204,7 @@ impl LlmClient {
         });
 
         let mut request = self.client.post(&url);
-        if let Some(api_key) = &self.api_key {
-            request = request.header("Authorization", format!("Bearer {api_key}"));
-        }
+        request = request.header("Authorization", format!("Bearer {api_key}"));
         request = request.header("Content-Type", "application/json");
 
         let response = request
@@ -238,6 +242,13 @@ impl LlmClient {
     }
 
     async fn chat_anthropic(&self, messages: Vec<ChatMessage>) -> Result<String, ArgusError> {
+        let api_key = self.api_key.as_deref().ok_or_else(|| {
+            ArgusError::Llm(
+                "Anthropic API key required. Set it in .argus.toml or export ANTHROPIC_API_KEY"
+                    .into(),
+            )
+        })?;
+
         let base_url = self
             .base_url
             .as_deref()
@@ -284,9 +295,7 @@ impl LlmClient {
         }
 
         let mut request = self.client.post(&url);
-        if let Some(api_key) = &self.api_key {
-            request = request.header("x-api-key", api_key);
-        }
+        request = request.header("x-api-key", api_key);
         request = request
             .header("anthropic-version", "2023-06-01")
             .header("Content-Type", "application/json");
@@ -345,16 +354,25 @@ impl LlmClient {
     }
 
     async fn chat_gemini(&self, messages: Vec<ChatMessage>) -> Result<String, ArgusError> {
+        let api_key = self.api_key.as_deref().ok_or_else(|| {
+            ArgusError::Llm(
+                "Gemini API key required. Set it in .argus.toml or export GEMINI_API_KEY".into(),
+            )
+        })?;
+
         let base_url = self
             .base_url
             .as_deref()
             .unwrap_or("https://generativelanguage.googleapis.com");
 
-        let api_key = self.api_key.as_deref().unwrap_or("");
         let url = format!(
             "{base_url}/v1beta/models/{}:generateContent?key={api_key}",
             self.model,
         );
+
+        // Redact the API key from error messages to prevent leaking it via
+        // URLs embedded in reqwest errors.
+        let redact = |msg: String| -> String { msg.replace(api_key, "[REDACTED]") };
 
         // Extract system messages and build contents array
         let mut system_parts: Vec<String> = Vec::new();
@@ -397,7 +415,7 @@ impl LlmClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ArgusError::Llm(format!("Gemini request failed: {e}")))?;
+            .map_err(|e| ArgusError::Llm(redact(format!("Gemini request failed: {e}"))))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -408,20 +426,20 @@ impl LlmClient {
                     .and_then(|e| e.get("message"))
                     .and_then(|m| m.as_str())
                 {
-                    return Err(ArgusError::Llm(format!(
+                    return Err(ArgusError::Llm(redact(format!(
                         "Gemini API error {status}: {msg}"
-                    )));
+                    ))));
                 }
             }
-            return Err(ArgusError::Llm(format!(
+            return Err(ArgusError::Llm(redact(format!(
                 "Gemini API error {status}: {body_text}"
-            )));
+            ))));
         }
 
         let response_body: serde_json::Value = response
             .json()
             .await
-            .map_err(|e| ArgusError::Llm(format!("failed to parse Gemini response: {e}")))?;
+            .map_err(|e| ArgusError::Llm(redact(format!("failed to parse Gemini response: {e}"))))?;
 
         let text = response_body
             .get("candidates")
@@ -432,9 +450,9 @@ impl LlmClient {
             .and_then(|p| p.get("text"))
             .and_then(|t| t.as_str())
             .ok_or_else(|| {
-                ArgusError::Llm(format!(
+                ArgusError::Llm(redact(format!(
                     "unexpected Gemini response structure: {response_body}"
-                ))
+                )))
             })?;
 
         Ok(text.to_string())
