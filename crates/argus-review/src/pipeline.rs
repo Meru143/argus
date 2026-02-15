@@ -1,6 +1,7 @@
 use std::fmt;
+use std::path::Path;
 
-use argus_core::{ArgusError, ReviewComment, ReviewConfig, Severity};
+use argus_core::{ArgusError, OutputFormat, ReviewComment, ReviewConfig, Severity};
 use serde::Serialize;
 
 use argus_difflens::parser::FileDiff;
@@ -84,16 +85,35 @@ impl ReviewPipeline {
 
     /// Run a review on parsed diffs and return filtered comments.
     ///
+    /// When `repo_path` is provided, a repo map is generated using the diff
+    /// file paths as focus files and included in the LLM prompt for context.
+    ///
     /// # Errors
     ///
     /// Returns [`ArgusError::Llm`] if the LLM call fails.
-    pub async fn review(&self, diffs: &[FileDiff]) -> Result<ReviewResult, ArgusError> {
+    pub async fn review(
+        &self,
+        diffs: &[FileDiff],
+        repo_path: Option<&Path>,
+    ) -> Result<ReviewResult, ArgusError> {
         let files_reviewed = diffs.len();
         let total_hunks: usize = diffs.iter().map(|d| d.hunks.len()).sum();
 
+        // Generate repo map if a repo path is provided
+        let repo_map = if let Some(root) = repo_path {
+            let focus_files: Vec<std::path::PathBuf> =
+                diffs.iter().map(|d| d.new_path.clone()).collect();
+            match argus_repomap::generate_map(root, 1024, &focus_files, OutputFormat::Text) {
+                Ok(map) if !map.is_empty() => Some(map),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
         let diff_text = diffs_to_text(diffs);
         let system = prompt::build_system_prompt();
-        let user = prompt::build_review_prompt(&diff_text, None);
+        let user = prompt::build_review_prompt(&diff_text, repo_map.as_deref(), None);
 
         let messages = vec![
             ChatMessage {
