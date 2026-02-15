@@ -2,7 +2,7 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 
 use argus_core::{OutputFormat, Severity};
 
@@ -132,6 +132,13 @@ enum Command {
     },
     /// Create a default .argus.toml configuration file
     Init,
+    /// Generate shell completion scripts
+    #[command(hide = true)]
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -714,6 +721,10 @@ async fn main() -> Result<()> {
             }
             std::fs::write(path, DEFAULT_CONFIG)?;
             println!("Created .argus.toml with default configuration");
+        }
+        Command::Completions { shell } => {
+            let mut cmd = Cli::command();
+            clap_complete::generate(shell, &mut cmd, "argus", &mut std::io::stdout());
         }
     }
 

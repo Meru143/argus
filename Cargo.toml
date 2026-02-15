@@ -72,6 +72,7 @@ argus-gitpulse = { workspace = true }
 argus-review = { workspace = true }
 argus-mcp = { workspace = true }
 clap = { workspace = true }
+clap_complete = "4"
 anyhow = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
