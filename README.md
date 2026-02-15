@@ -10,7 +10,7 @@ intelligence, and LLM-powered reviews to catch what your copilot misses.
 
 - **`argus map`** — Structural codebase overview (tree-sitter + PageRank ranking)
 - **`argus diff`** — Risk scoring for code changes (size, complexity, diffusion)
-- **`argus search`** — Semantic + keyword hybrid code search (Voyage embeddings)
+- **`argus search`** — Semantic + keyword hybrid code search (Voyage/Gemini/OpenAI embeddings)
 - **`argus history`** — Hotspot detection, temporal coupling, bus factor analysis
 - **`argus review`** — AI-powered code review with context from all modules
 - **`argus mcp`** — MCP server for IDE integration (Cursor, Windsurf, Claude Code)
@@ -103,6 +103,9 @@ argus review --pr owner/repo#42 --fail-on bug
 
 # Include low-severity suggestions
 argus review --pr owner/repo#42 --include-suggestions
+
+# Debug noise reduction — see which comments were filtered and why
+argus review --pr owner/repo#42 --show-filtered
 ```
 
 ### MCP Server
@@ -143,6 +146,7 @@ jobs:
       - name: Run Review
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Or use ANTHROPIC_API_KEY / GEMINI_API_KEY
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           argus review \
@@ -208,23 +212,76 @@ Create `.argus.toml` in your project root (or run `argus init`):
 # skip_patterns = ["*.lock", "*.min.js", "vendor/**"]
 # include_suggestions = false
 
-[embedding]
-# provider = "voyage"
-# model = "voyage-code-3"
-
 [history]
 # since_days = 180
-
-[llm]
-# provider = "openai"
-# model = "gpt-4o"
-# base_url = "https://api.openai.com/v1"
 ```
 
-Environment variables:
-- `OPENAI_API_KEY` — API key for the LLM provider
-- `VOYAGE_API_KEY` — API key for Voyage embeddings (semantic search)
-- `GITHUB_TOKEN` — Token for GitHub PR integration
+### LLM Providers
+
+```toml
+# OpenAI (default)
+[llm]
+provider = "openai"
+model = "gpt-4o"
+
+# Anthropic
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+
+# Gemini (free tier available)
+[llm]
+provider = "gemini"
+model = "gemini-2.0-flash"
+```
+
+### Embedding Providers
+
+```toml
+# Voyage (default)
+[embedding]
+provider = "voyage"
+model = "voyage-code-3"
+
+# Gemini
+[embedding]
+provider = "gemini"
+model = "text-embedding-004"
+
+# OpenAI
+[embedding]
+provider = "openai"
+model = "text-embedding-3-small"
+```
+
+### Zero-Cost Setup
+
+Use Gemini for both LLM and embeddings with a free API key:
+
+```toml
+[llm]
+provider = "gemini"
+model = "gemini-2.0-flash"
+
+[embedding]
+provider = "gemini"
+model = "text-embedding-004"
+```
+
+```bash
+export GEMINI_API_KEY="your-key"
+argus review --pr owner/repo#42
+```
+
+### Environment Variables
+
+| Variable | Provider |
+|----------|----------|
+| `OPENAI_API_KEY` | OpenAI LLM + embeddings |
+| `ANTHROPIC_API_KEY` | Anthropic LLM |
+| `GEMINI_API_KEY` | Gemini LLM + embeddings |
+| `VOYAGE_API_KEY` | Voyage embeddings |
+| `GITHUB_TOKEN` | GitHub PR integration |
 
 ## Architecture
 
