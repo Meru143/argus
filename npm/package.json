@@ -10,13 +10,13 @@
   "homepage": "https://github.com/Meru143/argus",
   "keywords": ["code-review", "ai", "llm", "rust", "anthropic", "openai", "gemini", "mcp"],
   "bin": {
-    "argus": "./bin/argus"
+    "argus": "bin/argus"
   },
   "scripts": {
     "postinstall": "node install.js"
   },
   "files": [
-    "bin/",
+    "bin/argus",
     "install.js",
     "README.md"
   ],
