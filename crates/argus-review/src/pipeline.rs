@@ -4,6 +4,7 @@ use std::path::Path;
 use argus_core::{ArgusError, OutputFormat, ReviewComment, ReviewConfig, Severity};
 use serde::Serialize;
 
+use argus_difflens::filter::{DiffFilter, SkippedFile};
 use argus_difflens::parser::FileDiff;
 
 use crate::llm::{ChatMessage, LlmClient, Role};
@@ -20,10 +21,14 @@ use crate::prompt;
 ///     comments: vec![],
 ///     stats: ReviewStats {
 ///         files_reviewed: 0,
+///         files_skipped: 0,
 ///         total_hunks: 0,
 ///         comments_generated: 0,
 ///         comments_filtered: 0,
+///         comments_deduplicated: 0,
+///         skipped_files: vec![],
 ///         model_used: "gpt-4o".into(),
+///         llm_calls: 0,
 ///     },
 /// };
 /// assert!(result.comments.is_empty());
@@ -46,26 +51,39 @@ pub struct ReviewResult {
 ///
 /// let stats = ReviewStats {
 ///     files_reviewed: 3,
+///     files_skipped: 1,
 ///     total_hunks: 5,
 ///     comments_generated: 10,
 ///     comments_filtered: 7,
+///     comments_deduplicated: 1,
+///     skipped_files: vec![],
 ///     model_used: "gpt-4o".into(),
+///     llm_calls: 2,
 /// };
-/// assert_eq!(stats.comments_generated - stats.comments_filtered, 3);
+/// assert_eq!(stats.files_reviewed, 3);
 /// ```
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewStats {
     /// Number of files that were reviewed.
     pub files_reviewed: usize,
+    /// Number of files skipped by the pre-LLM filter.
+    pub files_skipped: usize,
     /// Total number of diff hunks sent.
     pub total_hunks: usize,
     /// Raw comments from the LLM before filtering.
     pub comments_generated: usize,
     /// Comments removed by confidence/severity filters.
     pub comments_filtered: usize,
+    /// Duplicate comments merged.
+    pub comments_deduplicated: usize,
+    /// Files that were skipped with reasons.
+    #[serde(skip)]
+    pub skipped_files: Vec<SkippedFile>,
     /// Model identifier used for the review.
     pub model_used: String,
+    /// Number of LLM API calls made.
+    pub llm_calls: usize,
 }
 
 /// Review orchestrator that drives the full review pipeline.
@@ -88,6 +106,12 @@ impl ReviewPipeline {
     /// When `repo_path` is provided, a repo map is generated using the diff
     /// file paths as focus files and included in the LLM prompt for context.
     ///
+    /// The pipeline:
+    /// 1. Pre-filters diffs (lock files, generated, vendored, etc.)
+    /// 2. Splits large diffs into per-file LLM calls if needed
+    /// 3. Deduplicates comments
+    /// 4. Applies confidence/severity filtering
+    ///
     /// # Errors
     ///
     /// Returns [`ArgusError::Llm`] if the LLM call fails.
@@ -96,13 +120,37 @@ impl ReviewPipeline {
         diffs: &[FileDiff],
         repo_path: Option<&Path>,
     ) -> Result<ReviewResult, ArgusError> {
-        let files_reviewed = diffs.len();
-        let total_hunks: usize = diffs.iter().map(|d| d.hunks.len()).sum();
+        // 1. Pre-filter diffs
+        let diff_filter = DiffFilter::from_config(&self.config);
+        let filter_result = diff_filter.filter(diffs.to_vec());
+        let kept_diffs = filter_result.kept;
+        let skipped_files = filter_result.skipped;
+        let files_skipped = skipped_files.len();
+
+        let files_reviewed = kept_diffs.len();
+        let total_hunks: usize = kept_diffs.iter().map(|d| d.hunks.len()).sum();
+
+        if kept_diffs.is_empty() {
+            return Ok(ReviewResult {
+                comments: Vec::new(),
+                stats: ReviewStats {
+                    files_reviewed: 0,
+                    files_skipped,
+                    total_hunks: 0,
+                    comments_generated: 0,
+                    comments_filtered: 0,
+                    comments_deduplicated: 0,
+                    skipped_files,
+                    model_used: self.llm.model().to_string(),
+                    llm_calls: 0,
+                },
+            });
+        }
 
         // Generate repo map if a repo path is provided
         let repo_map = if let Some(root) = repo_path {
             let focus_files: Vec<std::path::PathBuf> =
-                diffs.iter().map(|d| d.new_path.clone()).collect();
+                kept_diffs.iter().map(|d| d.new_path.clone()).collect();
             match argus_repomap::generate_map(root, 1024, &focus_files, OutputFormat::Text) {
                 Ok(map) if !map.is_empty() => Some(map),
                 _ => None,
@@ -111,35 +159,76 @@ impl ReviewPipeline {
             None
         };
 
-        let diff_text = diffs_to_text(diffs);
-        let system = prompt::build_system_prompt();
-        let user = prompt::build_review_prompt(&diff_text, repo_map.as_deref(), None);
+        // 2. Decide whether to split or send as one call
+        let diff_text = diffs_to_text(&kept_diffs);
+        let total_tokens = estimate_tokens(&diff_text);
 
-        let messages = vec![
-            ChatMessage {
-                role: Role::System,
-                content: system,
-            },
-            ChatMessage {
-                role: Role::User,
-                content: user,
-            },
-        ];
+        let system = prompt::build_system_prompt(&self.config);
+        let mut all_comments = Vec::new();
+        let mut llm_calls: usize = 0;
 
-        let response = self.llm.chat(messages).await?;
-        let raw_comments = prompt::parse_review_response(&response)?;
-        let comments_generated = raw_comments.len();
+        if total_tokens > self.config.max_diff_tokens && kept_diffs.len() > 1 {
+            // Split into per-file LLM calls
+            for diff in &kept_diffs {
+                let file_diff_text = diffs_to_text(std::slice::from_ref(diff));
+                let user = prompt::build_review_prompt(&file_diff_text, repo_map.as_deref(), None);
 
-        let (filtered, comments_filtered) = filter_and_sort(raw_comments, &self.config);
+                let messages = vec![
+                    ChatMessage {
+                        role: Role::System,
+                        content: system.clone(),
+                    },
+                    ChatMessage {
+                        role: Role::User,
+                        content: user,
+                    },
+                ];
+
+                let response = self.llm.chat(messages).await?;
+                llm_calls += 1;
+                let mut parsed = prompt::parse_review_response(&response)?;
+                all_comments.append(&mut parsed);
+            }
+        } else {
+            // Single LLM call
+            let user = prompt::build_review_prompt(&diff_text, repo_map.as_deref(), None);
+
+            let messages = vec![
+                ChatMessage {
+                    role: Role::System,
+                    content: system,
+                },
+                ChatMessage {
+                    role: Role::User,
+                    content: user,
+                },
+            ];
+
+            let response = self.llm.chat(messages).await?;
+            llm_calls = 1;
+            all_comments = prompt::parse_review_response(&response)?;
+        }
+
+        let comments_generated = all_comments.len();
+
+        // 3. Deduplicate
+        let (deduped, comments_deduplicated) = deduplicate(all_comments);
+
+        // 4. Filter and sort
+        let (filtered, comments_filtered) = filter_and_sort(deduped, &self.config);
 
         Ok(ReviewResult {
             comments: filtered,
             stats: ReviewStats {
                 files_reviewed,
+                files_skipped,
                 total_hunks,
                 comments_generated,
                 comments_filtered,
+                comments_deduplicated,
+                skipped_files,
                 model_used: self.llm.model().to_string(),
+                llm_calls,
             },
         })
     }
@@ -161,6 +250,38 @@ fn diffs_to_text(diffs: &[FileDiff]) -> String {
         }
     }
     text
+}
+
+fn estimate_tokens(text: &str) -> usize {
+    text.len() / 4
+}
+
+fn deduplicate(comments: Vec<ReviewComment>) -> (Vec<ReviewComment>, usize) {
+    let before = comments.len();
+    let mut seen: Vec<ReviewComment> = Vec::new();
+
+    for comment in comments {
+        let mut is_dup = false;
+        for existing in &mut seen {
+            if existing.file_path == comment.file_path
+                && existing.line == comment.line
+                && existing.message == comment.message
+            {
+                // Keep the higher confidence one
+                if comment.confidence > existing.confidence {
+                    existing.confidence = comment.confidence;
+                }
+                is_dup = true;
+                break;
+            }
+        }
+        if !is_dup {
+            seen.push(comment);
+        }
+    }
+
+    let deduped_count = before - seen.len();
+    (seen, deduped_count)
 }
 
 fn filter_and_sort(
@@ -202,13 +323,24 @@ impl fmt::Display for ReviewResult {
         writeln!(f, "==============")?;
         writeln!(
             f,
-            "Model: {} | Files: {} | Hunks: {} | Comments: {} (filtered: {})\n",
+            "Model: {} | Files: {} (skipped: {}) | Hunks: {} | Comments: {} (filtered: {}, deduped: {}) | LLM calls: {}\n",
             self.stats.model_used,
             self.stats.files_reviewed,
+            self.stats.files_skipped,
             self.stats.total_hunks,
             self.comments.len(),
             self.stats.comments_filtered,
+            self.stats.comments_deduplicated,
+            self.stats.llm_calls,
         )?;
+
+        if !self.stats.skipped_files.is_empty() {
+            writeln!(f, "Skipped files:")?;
+            for sf in &self.stats.skipped_files {
+                writeln!(f, "  {} ({})", sf.path.display(), sf.reason)?;
+            }
+            writeln!(f)?;
+        }
 
         if self.comments.is_empty() {
             writeln!(f, "No issues found.")?;
@@ -251,10 +383,14 @@ impl ReviewResult {
     ///     comments: vec![],
     ///     stats: ReviewStats {
     ///         files_reviewed: 0,
+    ///         files_skipped: 0,
     ///         total_hunks: 0,
     ///         comments_generated: 0,
     ///         comments_filtered: 0,
+    ///         comments_deduplicated: 0,
+    ///         skipped_files: vec![],
     ///         model_used: "gpt-4o".into(),
+    ///         llm_calls: 0,
     ///     },
     /// };
     /// let md = result.to_markdown();
@@ -264,12 +400,15 @@ impl ReviewResult {
         let mut out = String::new();
         out.push_str("# Review Results\n\n");
         out.push_str(&format!(
-            "**Model:** {} | **Files:** {} | **Hunks:** {} | **Comments:** {} (filtered: {})\n\n",
+            "**Model:** {} | **Files:** {} (skipped: {}) | **Hunks:** {} | **Comments:** {} (filtered: {}, deduped: {}) | **LLM calls:** {}\n\n",
             self.stats.model_used,
             self.stats.files_reviewed,
+            self.stats.files_skipped,
             self.stats.total_hunks,
             self.comments.len(),
             self.stats.comments_filtered,
+            self.stats.comments_deduplicated,
+            self.stats.llm_calls,
         ));
 
         if self.comments.is_empty() {
@@ -352,6 +491,7 @@ mod tests {
             min_confidence: 90.0,
             severity_filter: vec![Severity::Bug, Severity::Warning, Severity::Info],
             max_comments: 10,
+            ..ReviewConfig::default()
         };
         let (kept, filtered) = filter_and_sort(make_comments(), &config);
         // c.rs (85%) and d.rs (50%) should be removed
@@ -365,6 +505,7 @@ mod tests {
             min_confidence: 0.0,
             severity_filter: vec![Severity::Bug, Severity::Warning],
             max_comments: 10,
+            ..ReviewConfig::default()
         };
         let (kept, _) = filter_and_sort(make_comments(), &config);
         // Info comment should be removed
@@ -384,6 +525,7 @@ mod tests {
                 Severity::Info,
             ],
             max_comments: 10,
+            ..ReviewConfig::default()
         };
         let (kept, _) = filter_and_sort(make_comments(), &config);
         assert!(kept.len() >= 2);
@@ -402,9 +544,55 @@ mod tests {
                 Severity::Info,
             ],
             max_comments: 2,
+            ..ReviewConfig::default()
         };
         let (kept, _) = filter_and_sort(make_comments(), &config);
         assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn deduplication_merges_identical_comments() {
+        let comments = vec![
+            ReviewComment {
+                file_path: PathBuf::from("a.rs"),
+                line: 10,
+                severity: Severity::Bug,
+                message: "null deref".into(),
+                confidence: 85.0,
+                suggestion: None,
+            },
+            ReviewComment {
+                file_path: PathBuf::from("a.rs"),
+                line: 10,
+                severity: Severity::Bug,
+                message: "null deref".into(),
+                confidence: 95.0,
+                suggestion: None,
+            },
+            ReviewComment {
+                file_path: PathBuf::from("b.rs"),
+                line: 20,
+                severity: Severity::Warning,
+                message: "different issue".into(),
+                confidence: 90.0,
+                suggestion: None,
+            },
+        ];
+        let (deduped, count) = deduplicate(comments);
+        assert_eq!(deduped.len(), 2);
+        assert_eq!(count, 1);
+        // Should keep the higher confidence
+        let a_comment = deduped
+            .iter()
+            .find(|c| c.file_path == PathBuf::from("a.rs"))
+            .unwrap();
+        assert!((a_comment.confidence - 95.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_tokens_rough_calc() {
+        let text = "a".repeat(400);
+        assert_eq!(estimate_tokens(&text), 100);
     }
 
     #[test]
@@ -420,10 +608,14 @@ mod tests {
             }],
             stats: ReviewStats {
                 files_reviewed: 1,
+                files_skipped: 0,
                 total_hunks: 1,
                 comments_generated: 1,
                 comments_filtered: 0,
+                comments_deduplicated: 0,
+                skipped_files: vec![],
                 model_used: "test".into(),
+                llm_calls: 1,
             },
         };
         let text = format!("{result}");
