@@ -1,0 +1,32 @@
+name: Argus Code Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Argus
+        run: |
+          curl -sSL https://github.com/Meru143/argus/releases/latest/download/argus-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo mv argus /usr/local/bin/
+
+      - name: Run Review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          argus review \
+            --diff origin/${{ github.base_ref }}..HEAD \
+            --pr ${{ github.repository }}#${{ github.event.pull_request.number }} \
+            --post-comments \
+            --fail-on bug
