@@ -1,49 +1,67 @@
 use std::path::PathBuf;
 
-use argus_core::{ArgusError, ReviewComment, Severity};
+use argus_core::{ArgusError, ReviewComment, ReviewConfig, Severity};
 use serde::Deserialize;
 
-const SYSTEM_PROMPT: &str = "\
-You are Argus, an expert code reviewer. Your job is to find genuine bugs, \
-security issues, and significant problems in code changes.
-
-Rules:
-- Only comment on issues you are CERTAIN about
-- Reference specific line numbers from the diff
-- Do not speculate about code behavior you cannot verify
-- If unsure, do not comment
-- Do not comment on style, formatting, or naming unless it creates a bug
-- Focus on: bugs, security vulnerabilities, logic errors, race conditions, resource leaks
-
-Respond with a JSON object:
-{
-  \"comments\": [
-    {
-      \"file\": \"path/to/file.rs\",
-      \"line\": 42,
-      \"severity\": \"bug\" | \"warning\" | \"suggestion\" | \"info\",
-      \"message\": \"Clear explanation of the issue\",
-      \"confidence\": 0-100,
-      \"suggestion\": \"Optional fix suggestion\"
-    }
-  ]
-}
-
-If you find no issues, return: { \"comments\": [] }";
-
 /// Build the system prompt for the code review LLM.
+///
+/// Incorporates `max_comments` and severity configuration from [`ReviewConfig`]
+/// into the prompt text for better LLM adherence.
 ///
 /// # Examples
 ///
 /// ```
+/// use argus_core::ReviewConfig;
 /// use argus_review::prompt::build_system_prompt;
 ///
-/// let prompt = build_system_prompt();
+/// let config = ReviewConfig::default();
+/// let prompt = build_system_prompt(&config);
 /// assert!(prompt.contains("Argus"));
-/// assert!(prompt.contains("bugs"));
+/// assert!(prompt.contains("Maximum 5 comments"));
 /// ```
-pub fn build_system_prompt() -> String {
-    SYSTEM_PROMPT.to_string()
+pub fn build_system_prompt(config: &ReviewConfig) -> String {
+    let severity_note = if config.include_suggestions {
+        "- suggestion: Improvement that doesn't affect correctness"
+    } else {
+        "- suggestion: Improvement that doesn't affect correctness (ONLY include if explicitly enabled)"
+    };
+
+    format!(
+        "You are Argus, an expert code reviewer specializing in detecting genuine defects in code changes.\n\
+         \n\
+         RULES — FOLLOW STRICTLY:\n\
+         1. Only comment on issues you are CERTAIN about. If confidence is below 90%, do not include it.\n\
+         2. Reference EXACT line numbers from the diff. Every comment MUST have a valid line number.\n\
+         3. Do NOT speculate about code behavior you cannot verify from the diff alone.\n\
+         4. Do NOT comment on: style, formatting, naming conventions, missing comments, or documentation.\n\
+         5. Do NOT suggest adding tests unless the change breaks existing test assumptions.\n\
+         6. Focus EXCLUSIVELY on: bugs, security vulnerabilities, logic errors, race conditions, resource leaks, null/None dereferences, integer overflow, off-by-one errors.\n\
+         7. For each issue, explain WHY it's a problem with a concrete scenario.\n\
+         8. Maximum {max_comments} comments. Prioritize by severity (bug > warning).\n\
+         \n\
+         SEVERITY DEFINITIONS:\n\
+         - bug: Code that WILL produce incorrect behavior in a concrete scenario you can describe\n\
+         - warning: Code that COULD produce incorrect behavior under specific conditions\n\
+         {severity_note}\n\
+         - info: Observation (NEVER include unless explicitly enabled)\n\
+         \n\
+         Respond with a JSON object. No markdown fences, no explanation outside JSON:\n\
+         {{\n\
+           \"comments\": [\n\
+             {{\n\
+               \"file\": \"exact/path/from/diff.rs\",\n\
+               \"line\": 42,\n\
+               \"severity\": \"bug\",\n\
+               \"message\": \"Concrete explanation with scenario\",\n\
+               \"confidence\": 95,\n\
+               \"suggestion\": \"Optional concrete fix\"\n\
+             }}\n\
+           ]\n\
+         }}\n\
+         \n\
+         If you find no issues worth reporting, return: {{\"comments\": []}}",
+        max_comments = config.max_comments,
+    )
 }
 
 /// Build the user prompt containing the diff to review.
@@ -181,10 +199,33 @@ mod tests {
 
     #[test]
     fn system_prompt_contains_key_instructions() {
-        let prompt = build_system_prompt();
+        let config = ReviewConfig::default();
+        let prompt = build_system_prompt(&config);
         assert!(prompt.contains("CERTAIN"));
-        assert!(prompt.contains("line numbers"));
+        assert!(prompt.contains("line number"));
         assert!(prompt.contains("comments"));
+        assert!(prompt.contains("Maximum 5 comments"));
+    }
+
+    #[test]
+    fn system_prompt_reflects_max_comments() {
+        let config = ReviewConfig {
+            max_comments: 10,
+            ..ReviewConfig::default()
+        };
+        let prompt = build_system_prompt(&config);
+        assert!(prompt.contains("Maximum 10 comments"));
+    }
+
+    #[test]
+    fn system_prompt_reflects_include_suggestions() {
+        let config = ReviewConfig {
+            include_suggestions: true,
+            ..ReviewConfig::default()
+        };
+        let prompt = build_system_prompt(&config);
+        // Should NOT contain the restriction about "ONLY include if explicitly enabled"
+        assert!(!prompt.contains("ONLY include if explicitly enabled"));
     }
 
     #[test]
