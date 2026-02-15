@@ -171,6 +171,13 @@ impl ReviewPipeline {
             None
         };
 
+        // Build git history context if repo is available
+        let history_context = if let Some(root) = repo_path {
+            build_history_context(&kept_diffs, root)
+        } else {
+            None
+        };
+
         // 2. Decide whether to split or send as one call
         let diff_text = diffs_to_text(&kept_diffs);
         let total_tokens = estimate_tokens(&diff_text);
@@ -187,6 +194,7 @@ impl ReviewPipeline {
                     &file_diff_text,
                     repo_map.as_deref(),
                     related_code.as_deref(),
+                    history_context.as_deref(),
                     None,
                 );
 
@@ -212,6 +220,7 @@ impl ReviewPipeline {
                 &diff_text,
                 repo_map.as_deref(),
                 related_code.as_deref(),
+                history_context.as_deref(),
                 None,
             );
 
@@ -400,6 +409,81 @@ fn build_related_code_context(diffs: &[FileDiff], index_path: &std::path::Path) 
     } else {
         Some(output)
     }
+}
+
+/// Build git history context for files in the diff.
+///
+/// Mines recent history and identifies hotspots, coupling, and knowledge silos
+/// for the changed files.
+fn build_history_context(diffs: &[FileDiff], repo_path: &Path) -> Option<String> {
+    let options = argus_gitpulse::mining::MiningOptions::default();
+    let commits = match argus_gitpulse::mining::mine_history(repo_path, &options) {
+        Ok(c) if !c.is_empty() => c,
+        _ => return None,
+    };
+
+    let hotspots = argus_gitpulse::hotspots::detect_hotspots(repo_path, &commits).ok()?;
+    let coupling = argus_gitpulse::coupling::detect_coupling(&commits, 0.3, 3).ok()?;
+    let ownership = argus_gitpulse::ownership::analyze_ownership(&commits).ok()?;
+
+    // Collect paths of changed files
+    let changed_files: std::collections::HashSet<String> = diffs
+        .iter()
+        .map(|d| d.new_path.to_string_lossy().to_string())
+        .collect();
+
+    let mut lines = Vec::new();
+
+    // Hotspot info for changed files
+    for h in &hotspots {
+        if changed_files.contains(&h.path) {
+            lines.push(format!(
+                "- {}: {} revisions in {} months, {} authors, {}",
+                h.path,
+                h.revisions,
+                options.since_days / 30,
+                h.authors,
+                if h.score >= 0.7 {
+                    format!("HOTSPOT (score: {:.2})", h.score)
+                } else {
+                    format!("score: {:.2}", h.score)
+                },
+            ));
+        }
+    }
+
+    // Coupling info for changed files
+    for pair in &coupling {
+        let a_changed = changed_files.contains(&pair.file_a);
+        let b_changed = changed_files.contains(&pair.file_b);
+        if a_changed || b_changed {
+            lines.push(format!(
+                "- {} is temporally coupled with {} (coupling: {:.2}, {} co-changes)",
+                pair.file_a, pair.file_b, pair.coupling_degree, pair.co_changes,
+            ));
+        }
+    }
+
+    // Ownership info for changed files
+    for file in &ownership.files {
+        if changed_files.contains(&file.path) && file.is_knowledge_silo {
+            let Some(dominant) = file.authors.first() else {
+                continue;
+            };
+            lines.push(format!(
+                "- {}: knowledge silo (single author: {}, {:.0}% of commits)",
+                file.path,
+                dominant.email,
+                dominant.ratio * 100.0,
+            ));
+        }
+    }
+
+    if lines.is_empty() {
+        return None;
+    }
+
+    Some(lines.join("\n"))
 }
 
 impl fmt::Display for ReviewResult {

@@ -2,7 +2,7 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 use argus_core::OutputFormat;
 
@@ -75,8 +75,28 @@ enum Command {
         #[arg(long)]
         reindex: bool,
     },
-    /// Analyze git history for hotspots and patterns
-    History,
+    /// Analyze git history for hotspots, coupling, and ownership
+    History {
+        /// Repository path (default: current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Analysis type
+        #[arg(long, default_value = "all")]
+        analysis: HistoryAnalysis,
+
+        /// Time range in days (default: 180)
+        #[arg(long, default_value = "180")]
+        since: u64,
+
+        /// Maximum results to show (default: 20)
+        #[arg(long, default_value = "20")]
+        limit: usize,
+
+        /// Minimum coupling degree to show (default: 0.3)
+        #[arg(long, default_value = "0.3")]
+        min_coupling: f64,
+    },
     /// Run an AI-powered code review
     Review {
         /// GitHub PR to review (format: owner/repo#123)
@@ -100,6 +120,18 @@ enum Command {
     },
     /// Start the MCP server for IDE integration
     Mcp,
+}
+
+#[derive(Clone, ValueEnum)]
+enum HistoryAnalysis {
+    /// Detect high-churn hotspots
+    Hotspots,
+    /// Detect temporal coupling between files
+    Coupling,
+    /// Analyze knowledge silos and bus factor
+    Ownership,
+    /// Run all analyses
+    All,
 }
 
 fn read_diff_input(file: &Option<PathBuf>) -> Result<String> {
@@ -252,8 +284,209 @@ async fn main() -> Result<()> {
                 anyhow::bail!("provide a search query, or use --index / --reindex");
             }
         }
-        Command::History => {
-            anyhow::bail!("history subcommand not yet implemented")
+        Command::History {
+            ref path,
+            ref analysis,
+            since,
+            limit,
+            min_coupling,
+        } => {
+            let options = argus_gitpulse::mining::MiningOptions {
+                since_days: since,
+                ..argus_gitpulse::mining::MiningOptions::default()
+            };
+
+            eprintln!(
+                "Mining git history at {} (last {} days)...",
+                path.display(),
+                since
+            );
+            let commits = argus_gitpulse::mining::mine_history(path, &options)?;
+            eprintln!("Analyzed {} commits.", commits.len());
+
+            let show_hotspots =
+                matches!(analysis, HistoryAnalysis::All | HistoryAnalysis::Hotspots);
+            let show_coupling =
+                matches!(analysis, HistoryAnalysis::All | HistoryAnalysis::Coupling);
+            let show_ownership =
+                matches!(analysis, HistoryAnalysis::All | HistoryAnalysis::Ownership);
+
+            match cli.format {
+                OutputFormat::Json => {
+                    let mut json = serde_json::Map::new();
+                    json.insert(
+                        "commits_analyzed".into(),
+                        serde_json::Value::from(commits.len()),
+                    );
+
+                    if show_hotspots {
+                        let hotspots = argus_gitpulse::hotspots::detect_hotspots(path, &commits)?;
+                        let top: Vec<_> = hotspots.into_iter().take(limit).collect();
+                        json.insert("hotspots".into(), serde_json::to_value(&top)?);
+                    }
+                    if show_coupling {
+                        let coupling =
+                            argus_gitpulse::coupling::detect_coupling(&commits, min_coupling, 3)?;
+                        let top: Vec<_> = coupling.into_iter().take(limit).collect();
+                        json.insert("coupling".into(), serde_json::to_value(&top)?);
+                    }
+                    if show_ownership {
+                        let ownership = argus_gitpulse::ownership::analyze_ownership(&commits)?;
+                        json.insert("ownership".into(), serde_json::to_value(&ownership)?);
+                    }
+
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::Value::Object(json))?
+                    );
+                }
+                OutputFormat::Markdown => {
+                    println!("# Git History Analysis\n");
+                    println!("**Commits analyzed:** {}\n", commits.len());
+
+                    if show_hotspots {
+                        let hotspots = argus_gitpulse::hotspots::detect_hotspots(path, &commits)?;
+                        println!("## Hotspots\n");
+                        if hotspots.is_empty() {
+                            println!("No hotspots detected.\n");
+                        } else {
+                            println!("| Rank | File | Score | Revisions | Churn | LoC | Authors |");
+                            println!("|------|------|-------|-----------|-------|-----|---------|");
+                            for (i, h) in hotspots.iter().take(limit).enumerate() {
+                                println!(
+                                    "| {} | `{}` | {:.2} | {} | {} | {} | {} |",
+                                    i + 1,
+                                    h.path,
+                                    h.score,
+                                    h.revisions,
+                                    h.total_churn,
+                                    h.current_loc,
+                                    h.authors,
+                                );
+                            }
+                            println!();
+                        }
+                    }
+
+                    if show_coupling {
+                        let coupling =
+                            argus_gitpulse::coupling::detect_coupling(&commits, min_coupling, 3)?;
+                        println!("## Temporal Coupling\n");
+                        if coupling.is_empty() {
+                            println!("No significant coupling detected.\n");
+                        } else {
+                            println!("| File A | File B | Coupling | Co-changes |");
+                            println!("|--------|--------|----------|------------|");
+                            for pair in coupling.iter().take(limit) {
+                                println!(
+                                    "| `{}` | `{}` | {:.2} | {} |",
+                                    pair.file_a, pair.file_b, pair.coupling_degree, pair.co_changes,
+                                );
+                            }
+                            println!();
+                        }
+                    }
+
+                    if show_ownership {
+                        let ownership = argus_gitpulse::ownership::analyze_ownership(&commits)?;
+                        println!("## Ownership & Bus Factor\n");
+                        println!("- **Total files:** {}", ownership.total_files);
+                        println!(
+                            "- **Single-author files:** {}",
+                            ownership.single_author_files
+                        );
+                        println!("- **Knowledge silos:** {}", ownership.knowledge_silos);
+                        println!(
+                            "- **Project bus factor:** {}\n",
+                            ownership.project_bus_factor
+                        );
+
+                        let silos: Vec<_> = ownership
+                            .files
+                            .iter()
+                            .filter(|f| f.is_knowledge_silo)
+                            .collect();
+                        if !silos.is_empty() {
+                            println!("### Knowledge Silos\n");
+                            for f in silos.iter().take(limit) {
+                                let top_author = f
+                                    .authors
+                                    .first()
+                                    .map(|a| format!("{} ({:.0}%)", a.email, a.ratio * 100.0))
+                                    .unwrap_or_default();
+                                println!("- `{}`: {top_author}", f.path);
+                            }
+                            println!();
+                        }
+                    }
+                }
+                OutputFormat::Text => {
+                    if show_hotspots {
+                        let hotspots = argus_gitpulse::hotspots::detect_hotspots(path, &commits)?;
+                        println!("Hotspots (top {limit}):");
+                        println!("{:-<72}", "");
+                        for (i, h) in hotspots.iter().take(limit).enumerate() {
+                            println!(
+                                "{:>2}. {:<40} score={:.2}  rev={}  churn={}  loc={}  authors={}",
+                                i + 1,
+                                h.path,
+                                h.score,
+                                h.revisions,
+                                h.total_churn,
+                                h.current_loc,
+                                h.authors,
+                            );
+                        }
+                        println!();
+                    }
+
+                    if show_coupling {
+                        let coupling =
+                            argus_gitpulse::coupling::detect_coupling(&commits, min_coupling, 3)?;
+                        println!("Temporal Coupling (min coupling: {min_coupling}):");
+                        println!("{:-<72}", "");
+                        if coupling.is_empty() {
+                            println!("  No significant coupling detected.");
+                        } else {
+                            for pair in coupling.iter().take(limit) {
+                                println!(
+                                    "  {} <-> {} (coupling={:.2}, co-changes={})",
+                                    pair.file_a, pair.file_b, pair.coupling_degree, pair.co_changes,
+                                );
+                            }
+                        }
+                        println!();
+                    }
+
+                    if show_ownership {
+                        let ownership = argus_gitpulse::ownership::analyze_ownership(&commits)?;
+                        println!("Ownership & Bus Factor:");
+                        println!("{:-<72}", "");
+                        println!("  Total files:        {}", ownership.total_files);
+                        println!("  Single-author:      {}", ownership.single_author_files);
+                        println!("  Knowledge silos:    {}", ownership.knowledge_silos);
+                        println!("  Project bus factor: {}", ownership.project_bus_factor);
+
+                        let silos: Vec<_> = ownership
+                            .files
+                            .iter()
+                            .filter(|f| f.is_knowledge_silo)
+                            .collect();
+                        if !silos.is_empty() {
+                            println!("\n  Knowledge Silos:");
+                            for f in silos.iter().take(limit) {
+                                let top_author = f
+                                    .authors
+                                    .first()
+                                    .map(|a| format!("{} ({:.0}%)", a.email, a.ratio * 100.0))
+                                    .unwrap_or_default();
+                                println!("    {}: {top_author}", f.path);
+                            }
+                        }
+                        println!();
+                    }
+                }
+            }
         }
         Command::Review {
             ref pr,
