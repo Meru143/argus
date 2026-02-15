@@ -1,0 +1,8 @@
+[package]
+name = "argus-mcp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argus-core = { workspace = true }
+argus-review = { workspace = true }

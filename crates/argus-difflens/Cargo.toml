@@ -1,0 +1,7 @@
+[package]
+name = "argus-difflens"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argus-core = { workspace = true }

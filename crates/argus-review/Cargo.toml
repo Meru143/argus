@@ -1,0 +1,11 @@
+[package]
+name = "argus-review"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argus-core = { workspace = true }
+argus-repomap = { workspace = true }
+argus-difflens = { workspace = true }
+argus-codelens = { workspace = true }
+argus-gitpulse = { workspace = true }

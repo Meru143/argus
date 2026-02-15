@@ -1,0 +1,8 @@
+[package]
+name = "argus-codelens"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argus-core = { workspace = true }
+argus-repomap = { workspace = true }
