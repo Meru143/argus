@@ -582,7 +582,14 @@ async fn main() -> Result<()> {
                 let token_estimate = diff_input.len() / 4;
                 eprintln!("Token estimate: ~{}", token_estimate);
                 eprintln!("LLM calls: {}", result.stats.llm_calls);
-                if result.stats.llm_calls > 1 {
+                if !result.stats.file_groups.is_empty() {
+                    eprintln!("Cross-file grouping:");
+                    for (i, group) in result.stats.file_groups.iter().enumerate() {
+                        let label = if group.len() == 1 { "file" } else { "files" };
+                        let names = group.join(", ");
+                        eprintln!("  Group {} ({} {label}): {names}", i + 1, group.len());
+                    }
+                } else if result.stats.llm_calls > 1 {
                     eprintln!("  (diff was split into per-file calls)");
                 }
                 eprintln!(

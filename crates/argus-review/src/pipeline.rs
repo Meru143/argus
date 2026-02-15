@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
@@ -30,6 +31,7 @@ use crate::prompt;
 ///         skipped_files: vec![],
 ///         model_used: "gpt-4o".into(),
 ///         llm_calls: 0,
+///         file_groups: vec![],
 ///     },
 /// };
 /// assert!(result.comments.is_empty());
@@ -94,6 +96,7 @@ pub struct FilteredComment {
 ///     skipped_files: vec![],
 ///     model_used: "gpt-4o".into(),
 ///     llm_calls: 2,
+///     file_groups: vec![],
 /// };
 /// assert_eq!(stats.files_reviewed, 3);
 /// ```
@@ -119,6 +122,9 @@ pub struct ReviewStats {
     pub model_used: String,
     /// Number of LLM API calls made.
     pub llm_calls: usize,
+    /// Cross-file groups used during review (for verbose output).
+    #[serde(skip)]
+    pub file_groups: Vec<Vec<String>>,
 }
 
 /// Review orchestrator that drives the full review pipeline.
@@ -179,6 +185,7 @@ impl ReviewPipeline {
                     skipped_files,
                     model_used: self.llm.model().to_string(),
                     llm_calls: 0,
+                    file_groups: vec![],
                 },
             });
         }
@@ -221,17 +228,36 @@ impl ReviewPipeline {
         let system = prompt::build_system_prompt(&self.config);
         let mut all_comments = Vec::new();
         let mut llm_calls: usize = 0;
+        let mut file_groups: Vec<Vec<String>> = Vec::new();
 
         if total_tokens > self.config.max_diff_tokens && kept_diffs.len() > 1 {
-            // Split into per-file LLM calls
-            for diff in &kept_diffs {
-                let file_diff_text = diffs_to_text(std::slice::from_ref(diff));
+            // Split into groups and review each group
+            let groups = if self.config.cross_file {
+                group_related_diffs(&kept_diffs, self.config.max_diff_tokens)
+            } else {
+                // Disable grouping: each file is its own group
+                kept_diffs.iter().map(|d| vec![d]).collect()
+            };
+
+            // Record groups for verbose output
+            for group in &groups {
+                let names: Vec<String> = group
+                    .iter()
+                    .map(|d| d.new_path.to_string_lossy().into_owned())
+                    .collect();
+                file_groups.push(names);
+            }
+
+            for group in &groups {
+                let group_diff_text = diffs_to_text(group);
+                let is_cross_file = group.len() > 1;
                 let user = prompt::build_review_prompt(
-                    &file_diff_text,
+                    &group_diff_text,
                     repo_map.as_deref(),
                     related_code.as_deref(),
                     history_context.as_deref(),
                     None,
+                    is_cross_file,
                 );
 
                 let messages = vec![
@@ -252,12 +278,14 @@ impl ReviewPipeline {
             }
         } else {
             // Single LLM call
+            let is_cross_file = kept_diffs.len() > 1;
             let user = prompt::build_review_prompt(
                 &diff_text,
                 repo_map.as_deref(),
                 related_code.as_deref(),
                 history_context.as_deref(),
                 None,
+                is_cross_file,
             );
 
             let messages = vec![
@@ -298,15 +326,17 @@ impl ReviewPipeline {
                 skipped_files,
                 model_used: self.llm.model().to_string(),
                 llm_calls,
+                file_groups,
             },
         })
     }
 }
 
-fn diffs_to_text(diffs: &[FileDiff]) -> String {
+fn diffs_to_text<D: std::borrow::Borrow<FileDiff>>(diffs: &[D]) -> String {
     use std::fmt::Write;
     let mut text = String::new();
     for diff in diffs {
+        let diff = diff.borrow();
         let _ = writeln!(text, "--- a/{}", diff.old_path.display());
         let _ = writeln!(text, "+++ b/{}", diff.new_path.display());
         for hunk in &diff.hunks {
@@ -323,6 +353,48 @@ fn diffs_to_text(diffs: &[FileDiff]) -> String {
 
 fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
+}
+
+/// Group related diffs by parent directory, splitting groups that exceed
+/// `max_tokens`.
+///
+/// Files sharing a parent directory are reviewed together so the LLM can
+/// catch cross-file issues. Groups that would exceed the token budget are
+/// split into smaller sub-groups.
+fn group_related_diffs<'a>(
+    diffs: &'a [FileDiff],
+    max_tokens: usize,
+) -> Vec<Vec<&'a FileDiff>> {
+    use std::path::PathBuf;
+
+    let mut dir_groups: HashMap<PathBuf, Vec<&'a FileDiff>> = HashMap::new();
+    for diff in diffs {
+        let dir = Path::new(&diff.new_path)
+            .parent()
+            .unwrap_or(Path::new(""))
+            .to_path_buf();
+        dir_groups.entry(dir).or_default().push(diff);
+    }
+
+    let mut result = Vec::new();
+    for (_dir, files) in dir_groups {
+        let mut current_group: Vec<&FileDiff> = Vec::new();
+        let mut current_tokens: usize = 0;
+        for file in files {
+            let file_tokens = estimate_tokens(&diffs_to_text(std::slice::from_ref(file)));
+            if current_tokens + file_tokens > max_tokens && !current_group.is_empty() {
+                result.push(current_group);
+                current_group = Vec::new();
+                current_tokens = 0;
+            }
+            current_group.push(file);
+            current_tokens += file_tokens;
+        }
+        if !current_group.is_empty() {
+            result.push(current_group);
+        }
+    }
+    result
 }
 
 fn deduplicate(comments: Vec<ReviewComment>) -> (Vec<ReviewComment>, usize) {
@@ -616,6 +688,7 @@ impl ReviewResult {
     ///         skipped_files: vec![],
     ///         model_used: "gpt-4o".into(),
     ///         llm_calls: 0,
+    ///         file_groups: vec![],
     ///     },
     /// };
     /// let md = result.to_markdown();
@@ -849,6 +922,7 @@ mod tests {
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 1,
+                file_groups: vec![],
             },
         };
         let text = format!("{result}");
@@ -858,5 +932,86 @@ mod tests {
         let md = result.to_markdown();
         assert!(md.contains("# Review Results"));
         assert!(md.contains("Bug"));
+    }
+
+    fn make_file_diff(path: &str, content: &str) -> FileDiff {
+        use argus_core::{ChangeType, DiffHunk};
+        FileDiff {
+            old_path: PathBuf::from(path),
+            new_path: PathBuf::from(path),
+            hunks: vec![DiffHunk {
+                file_path: PathBuf::from(path),
+                old_start: 1,
+                old_lines: 0,
+                new_start: 1,
+                new_lines: 1,
+                content: content.into(),
+                change_type: ChangeType::Add,
+            }],
+            is_new_file: true,
+            is_deleted_file: false,
+            is_rename: false,
+        }
+    }
+
+    #[test]
+    fn group_same_directory_files_together() {
+        let diffs = vec![
+            make_file_diff("src/pipeline.rs", "+a\n"),
+            make_file_diff("src/prompt.rs", "+b\n"),
+            make_file_diff("tests/integration.rs", "+c\n"),
+        ];
+        let groups = group_related_diffs(&diffs, 100_000);
+        // Two directories: src/ and tests/
+        assert_eq!(groups.len(), 2);
+
+        let mut group_sizes: Vec<usize> = groups.iter().map(|g| g.len()).collect();
+        group_sizes.sort();
+        assert_eq!(group_sizes, vec![1, 2]);
+    }
+
+    #[test]
+    fn group_different_directories_separate() {
+        let diffs = vec![
+            make_file_diff("crates/core/src/lib.rs", "+a\n"),
+            make_file_diff("crates/review/src/lib.rs", "+b\n"),
+            make_file_diff("crates/mcp/src/lib.rs", "+c\n"),
+        ];
+        let groups = group_related_diffs(&diffs, 100_000);
+        assert_eq!(groups.len(), 3);
+        for group in &groups {
+            assert_eq!(group.len(), 1);
+        }
+    }
+
+    #[test]
+    fn group_splits_on_token_limit() {
+        // Each file has ~25 chars → ~6 tokens. With a limit of 10 tokens,
+        // two same-directory files should be split into separate groups.
+        let diffs = vec![
+            make_file_diff("src/a.rs", &"+".repeat(50)),
+            make_file_diff("src/b.rs", &"+".repeat(50)),
+        ];
+        let groups = group_related_diffs(&diffs, 10);
+        assert_eq!(groups.len(), 2);
+    }
+
+    #[test]
+    fn group_single_file_no_grouping() {
+        let diffs = vec![make_file_diff("src/lib.rs", "+a\n")];
+        let groups = group_related_diffs(&diffs, 100_000);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].len(), 1);
+    }
+
+    #[test]
+    fn group_root_directory_files() {
+        let diffs = vec![
+            make_file_diff("README.md", "+a\n"),
+            make_file_diff("Cargo.toml", "+b\n"),
+        ];
+        let groups = group_related_diffs(&diffs, 100_000);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].len(), 2);
     }
 }
