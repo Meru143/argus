@@ -4,3 +4,4 @@ CLAUDE.md
 .entire/
 docs/plans/
 npm/bin/argus-bin*
+npm/.npmrc
