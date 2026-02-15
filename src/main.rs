@@ -119,7 +119,11 @@ enum Command {
         include_suggestions: bool,
     },
     /// Start the MCP server for IDE integration
-    Mcp,
+    Mcp {
+        /// Repository path (default: current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -582,8 +586,8 @@ async fn main() -> Result<()> {
                 eprintln!("Posted {} comments to {pr_ref}", result.comments.len());
             }
         }
-        Command::Mcp => {
-            anyhow::bail!("mcp subcommand not yet implemented")
+        Command::Mcp { ref path } => {
+            argus_mcp::server::run_server(path.clone()).await?;
         }
     }
 
