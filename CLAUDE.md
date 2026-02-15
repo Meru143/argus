@@ -14,7 +14,7 @@ Cargo workspace with internal crates (all under `crates/`):
 - `argus-review` — AI review orchestration combining insights from all modules
 - `argus-mcp` — MCP server interface exposing tools to IDEs/agents (rmcp)
 
-Binary: `argus` with subcommands (`map`, `diff`, `search`, `history`, `review`, `mcp`).
+Binary: `argus` with subcommands (`map`, `diff`, `search`, `history`, `review`, `mcp`, `init`).
 
 ## Build & Test
 
@@ -85,3 +85,8 @@ JSON output uses camelCase keys. Text output is human-readable tables/summaries.
 - **MCP tool error messages teach**: Errors include guidance on what to try next (e.g., "Set VOYAGE_API_KEY env var")
 - **MCP repo_path resolution**: Each tool accepts optional `path` param, falls back to server's configured `--path` from CLI
 - **MCP search_codebase Send workaround**: `HybridSearch` is `Send` but not `Sync` (rusqlite `RefCell`), so `search_codebase` uses `spawn_blocking` + `Handle::block_on` to avoid holding `&HybridSearch` across await points in a `Send` future
+- **`--fail-on` severity threshold**: `Severity::meets_threshold()` uses a rank ordering (Bug=0, Warning=1, Suggestion=2, Info=3); a finding meets the threshold if its rank <= the threshold's rank
+- **`--post-comments` severity-based event**: PR reviews with any Bug-level finding use `REQUEST_CHANGES` event; otherwise `COMMENT`
+- **`argus init` config template**: Uses commented-out TOML keys so the generated file is valid TOML but shows available options
+- **Release workflow**: Uses `softprops/action-gh-release` with cross-compilation matrix (5 targets) rather than cargo-dist's built-in CI, for simplicity and control
+- **`Severity` implements `FromStr`**: Allows clap to parse `--fail-on bug` without adding clap as a dependency to argus-core
