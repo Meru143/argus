@@ -19,6 +19,7 @@ use crate::prompt;
 ///
 /// let result = ReviewResult {
 ///     comments: vec![],
+///     filtered_comments: vec![],
 ///     stats: ReviewStats {
 ///         files_reviewed: 0,
 ///         files_skipped: 0,
@@ -38,8 +39,42 @@ use crate::prompt;
 pub struct ReviewResult {
     /// Filtered and sorted review comments.
     pub comments: Vec<ReviewComment>,
+    /// Comments that were removed by filtering, with reasons.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub filtered_comments: Vec<FilteredComment>,
     /// Statistics about the review run.
     pub stats: ReviewStats,
+}
+
+/// A review comment that was removed by the filtering pipeline.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::PathBuf;
+/// use argus_core::{ReviewComment, Severity};
+/// use argus_review::pipeline::FilteredComment;
+///
+/// let fc = FilteredComment {
+///     comment: ReviewComment {
+///         file_path: PathBuf::from("src/lib.rs"),
+///         line: 10,
+///         severity: Severity::Info,
+///         message: "minor note".into(),
+///         confidence: 95.0,
+///         suggestion: None,
+///     },
+///     reason: "below confidence threshold".into(),
+/// };
+/// assert!(fc.reason.contains("confidence"));
+/// ```
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilteredComment {
+    /// The original comment that was filtered out.
+    pub comment: ReviewComment,
+    /// Why this comment was filtered.
+    pub reason: String,
 }
 
 /// Statistics about a review run.
@@ -133,6 +168,7 @@ impl ReviewPipeline {
         if kept_diffs.is_empty() {
             return Ok(ReviewResult {
                 comments: Vec::new(),
+                filtered_comments: Vec::new(),
                 stats: ReviewStats {
                     files_reviewed: 0,
                     files_skipped,
@@ -246,10 +282,12 @@ impl ReviewPipeline {
         let (deduped, comments_deduplicated) = deduplicate(all_comments);
 
         // 4. Filter and sort
-        let (filtered, comments_filtered) = filter_and_sort(deduped, &self.config);
+        let (final_comments, filtered_comments) = filter_and_sort(deduped, &self.config);
+        let comments_filtered = filtered_comments.len();
 
         Ok(ReviewResult {
-            comments: filtered,
+            comments: final_comments,
+            filtered_comments,
             stats: ReviewStats {
                 files_reviewed,
                 files_skipped,
@@ -318,15 +356,24 @@ fn deduplicate(comments: Vec<ReviewComment>) -> (Vec<ReviewComment>, usize) {
 fn filter_and_sort(
     comments: Vec<ReviewComment>,
     config: &ReviewConfig,
-) -> (Vec<ReviewComment>, usize) {
-    let before = comments.len();
-
+) -> (Vec<ReviewComment>, Vec<FilteredComment>) {
     let mut kept: Vec<ReviewComment> = Vec::new();
+    let mut filtered: Vec<FilteredComment> = Vec::new();
+
     for comment in comments {
         if comment.confidence < config.min_confidence {
+            filtered.push(FilteredComment {
+                comment,
+                reason: "below confidence threshold".into(),
+            });
             continue;
         }
         if !config.severity_filter.contains(&comment.severity) {
+            let sev = format!("{:?}", comment.severity).to_lowercase();
+            filtered.push(FilteredComment {
+                comment,
+                reason: format!("{sev}-level excluded"),
+            });
             continue;
         }
         kept.push(comment);
@@ -334,8 +381,16 @@ fn filter_and_sort(
 
     kept.sort_by_key(|c| severity_rank(c.severity));
 
-    kept.truncate(config.max_comments);
-    let filtered = before - kept.len();
+    if kept.len() > config.max_comments {
+        let truncated = kept.split_off(config.max_comments);
+        for comment in truncated {
+            filtered.push(FilteredComment {
+                comment,
+                reason: "exceeded max comment limit".into(),
+            });
+        }
+    }
+
     (kept, filtered)
 }
 
@@ -550,6 +605,7 @@ impl ReviewResult {
     ///
     /// let result = ReviewResult {
     ///     comments: vec![],
+    ///     filtered_comments: vec![],
     ///     stats: ReviewStats {
     ///         files_reviewed: 0,
     ///         files_skipped: 0,
@@ -665,7 +721,10 @@ mod tests {
         let (kept, filtered) = filter_and_sort(make_comments(), &config);
         // c.rs (85%) and d.rs (50%) should be removed
         assert_eq!(kept.len(), 2);
-        assert_eq!(filtered, 2);
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered
+            .iter()
+            .all(|f| f.reason.contains("confidence")));
     }
 
     #[test]
@@ -676,11 +735,12 @@ mod tests {
             max_comments: 10,
             ..ReviewConfig::default()
         };
-        let (kept, _) = filter_and_sort(make_comments(), &config);
+        let (kept, filtered) = filter_and_sort(make_comments(), &config);
         // Info comment should be removed
         for c in &kept {
             assert!(c.severity == Severity::Bug || c.severity == Severity::Warning);
         }
+        assert!(filtered.iter().any(|f| f.reason.contains("excluded")));
     }
 
     #[test]
@@ -715,8 +775,11 @@ mod tests {
             max_comments: 2,
             ..ReviewConfig::default()
         };
-        let (kept, _) = filter_and_sort(make_comments(), &config);
+        let (kept, filtered) = filter_and_sort(make_comments(), &config);
         assert_eq!(kept.len(), 2);
+        assert!(filtered
+            .iter()
+            .any(|f| f.reason.contains("max comment limit")));
     }
 
     #[test]
@@ -775,6 +838,7 @@ mod tests {
                 confidence: 99.0,
                 suggestion: Some("fix it".into()),
             }],
+            filtered_comments: vec![],
             stats: ReviewStats {
                 files_reviewed: 1,
                 files_skipped: 0,
