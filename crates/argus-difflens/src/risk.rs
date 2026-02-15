@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::Path;
 
-use argus_core::{ChangeType, RiskScore};
+use argus_core::{ChangeType, DiffHunk, RiskScore};
 use serde::{Deserialize, Serialize};
 
 use crate::parser::FileDiff;
@@ -129,8 +129,8 @@ impl fmt::Display for RiskLevel {
 
 /// Compute a risk report from parsed file diffs.
 ///
-/// Uses Phase 1 simplified scoring: size-based and file-type heuristics only.
-/// Complexity and coverage are set to 0 (requires tree-sitter / coverage data).
+/// Scoring uses size, file-type heuristics, and keyword-based complexity
+/// deltas. Coverage is set to 0 (requires coverage data).
 ///
 /// # Examples
 ///
@@ -173,11 +173,12 @@ pub fn compute_risk(diffs: &[FileDiff]) -> RiskReport {
             max_file_type_score = file_type_score;
         }
 
+        let file_complexity = compute_file_complexity_delta(diff);
         let change_type = dominant_change_type(diff);
 
         per_file.push(FileRisk {
             path: diff.new_path.clone(),
-            score: RiskScore::new(size, 0.0, diffusion, 0.0, file_type_score),
+            score: RiskScore::new(size, file_complexity, diffusion, 0.0, file_type_score),
             lines_added: added,
             lines_deleted: deleted,
             hunk_count: diff.hunks.len(),
@@ -188,9 +189,10 @@ pub fn compute_risk(diffs: &[FileDiff]) -> RiskReport {
     let total_lines = (total_additions + total_deletions) as f64;
     let overall_size = (total_lines * 2.0).min(100.0);
     let overall_diffusion = (diffs.len() as f64 * 20.0).min(100.0);
+    let overall_complexity = compute_avg_complexity_delta(diffs);
     let overall = RiskScore::new(
         overall_size,
-        0.0,
+        overall_complexity,
         overall_diffusion,
         0.0,
         max_file_type_score,
@@ -223,6 +225,86 @@ fn count_lines(diff: &FileDiff) -> (u32, u32) {
         }
     }
     (added, deleted)
+}
+
+/// Compute the cyclomatic complexity delta for a single hunk.
+///
+/// Counts branch keywords (`if`, `else if`, `elif`, `match`, `for`,
+/// `while`, `loop`, `?`, `catch`, `except`, `case`) in added vs removed
+/// lines. Returns a score from 0 to 100.
+///
+/// # Examples
+///
+/// ```
+/// use argus_core::{DiffHunk, ChangeType};
+/// use std::path::PathBuf;
+/// use argus_difflens::risk::compute_complexity_delta;
+///
+/// let hunk = DiffHunk {
+///     file_path: PathBuf::from("test.rs"),
+///     old_start: 1, old_lines: 1, new_start: 1, new_lines: 4,
+///     content: "+if x > 0 {\n+    for i in items {\n+    }\n+}\n".into(),
+///     change_type: ChangeType::Modify,
+/// };
+/// let score = compute_complexity_delta(&hunk);
+/// assert!(score > 0.0);
+/// ```
+pub fn compute_complexity_delta(hunk: &DiffHunk) -> f64 {
+    let mut added_branches: i64 = 0;
+    let mut removed_branches: i64 = 0;
+
+    for line in hunk.content.lines() {
+        if let Some(code) = line.strip_prefix('+') {
+            added_branches += count_branch_keywords(code);
+        } else if let Some(code) = line.strip_prefix('-') {
+            removed_branches += count_branch_keywords(code);
+        }
+    }
+
+    let delta = added_branches - removed_branches;
+    (delta.unsigned_abs() as f64 * 15.0).min(100.0)
+}
+
+fn compute_file_complexity_delta(diff: &FileDiff) -> f64 {
+    if diff.hunks.is_empty() {
+        return 0.0;
+    }
+    let mut total = 0.0;
+    for hunk in &diff.hunks {
+        total += compute_complexity_delta(hunk);
+    }
+    (total / diff.hunks.len() as f64).min(100.0)
+}
+
+fn compute_avg_complexity_delta(diffs: &[FileDiff]) -> f64 {
+    if diffs.is_empty() {
+        return 0.0;
+    }
+    let mut total = 0.0;
+    for diff in diffs {
+        total += compute_file_complexity_delta(diff);
+    }
+    (total / diffs.len() as f64).min(100.0)
+}
+
+const BRANCH_KEYWORDS: &[&str] = &[
+    "if ", "else if ", "elif ", "match ", "for ", "while ", "loop ", "loop{", "catch ", "catch(",
+    "except ", "except:", "case ",
+];
+
+fn count_branch_keywords(line: &str) -> i64 {
+    let trimmed = line.trim();
+    let mut count: i64 = 0;
+    for kw in BRANCH_KEYWORDS {
+        if trimmed.starts_with(kw) || trimmed.contains(&format!(" {kw}")) {
+            count += 1;
+        }
+    }
+    // Ternary operator
+    if trimmed.contains('?') && trimmed.contains(':') {
+        count += 1;
+    }
+    count
 }
 
 fn dominant_change_type(diff: &FileDiff) -> ChangeType {
@@ -435,5 +517,93 @@ diff --git a/f.rs b/f.rs
         let md = report.to_markdown();
         assert!(md.contains("# Risk Report"));
         assert!(md.contains("f.rs"));
+    }
+
+    #[test]
+    fn complexity_delta_added_branches() {
+        let hunk = DiffHunk {
+            file_path: std::path::PathBuf::from("test.rs"),
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 5,
+            content: "+if x > 0 {\n+    for i in items {\n+        while running {\n+        }\n+    }\n+}\n"
+                .into(),
+            change_type: ChangeType::Modify,
+        };
+        let score = compute_complexity_delta(&hunk);
+        // 3 branch keywords * 15 = 45
+        assert!((score - 45.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn complexity_delta_removed_branches() {
+        let hunk = DiffHunk {
+            file_path: std::path::PathBuf::from("test.rs"),
+            old_start: 1,
+            old_lines: 3,
+            new_start: 1,
+            new_lines: 0,
+            content: "-if x > 0 {\n-    match val {\n-    }\n-}\n".into(),
+            change_type: ChangeType::Modify,
+        };
+        let score = compute_complexity_delta(&hunk);
+        // 2 removed branches, delta = abs(-2) * 15 = 30
+        assert!((score - 30.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn complexity_delta_no_branch_changes() {
+        let hunk = DiffHunk {
+            file_path: std::path::PathBuf::from("test.rs"),
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 2,
+            content: "+let x = 42;\n+let y = x + 1;\n".into(),
+            change_type: ChangeType::Modify,
+        };
+        let score = compute_complexity_delta(&hunk);
+        assert!((score - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn complexity_delta_mixed_add_remove() {
+        let hunk = DiffHunk {
+            file_path: std::path::PathBuf::from("test.rs"),
+            old_start: 1,
+            old_lines: 2,
+            new_start: 1,
+            new_lines: 3,
+            content: "-if old_check {\n+if new_check {\n+    for item in list {\n+    }\n".into(),
+            change_type: ChangeType::Modify,
+        };
+        let score = compute_complexity_delta(&hunk);
+        // added: 2 (if, for), removed: 1 (if), delta = 1 * 15 = 15
+        assert!((score - 15.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn risk_score_uses_real_complexity() {
+        let diff = "\
+diff --git a/complex.rs b/complex.rs
+--- a/complex.rs
++++ b/complex.rs
+@@ -1,1 +1,5 @@
+ fn main() {
++    if x > 0 {
++        for i in items {
++            while running {
++            }
++        }
++    }
+ }
+";
+        let files = parse_unified_diff(diff).unwrap();
+        let report = compute_risk(&files);
+        assert!(
+            report.overall.complexity > 0.0,
+            "complexity should be non-zero for diffs with branch changes"
+        );
     }
 }
