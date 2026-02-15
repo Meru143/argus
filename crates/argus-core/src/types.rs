@@ -348,6 +348,8 @@ pub enum OutputFormat {
     Json,
     /// Markdown-formatted output.
     Markdown,
+    /// SARIF v2.1.0 for GitHub Code Scanning.
+    Sarif,
 }
 
 impl fmt::Display for OutputFormat {
@@ -356,6 +358,7 @@ impl fmt::Display for OutputFormat {
             OutputFormat::Text => write!(f, "text"),
             OutputFormat::Json => write!(f, "json"),
             OutputFormat::Markdown => write!(f, "markdown"),
+            OutputFormat::Sarif => write!(f, "sarif"),
         }
     }
 }
@@ -368,6 +371,7 @@ impl FromStr for OutputFormat {
             "text" => Ok(OutputFormat::Text),
             "json" => Ok(OutputFormat::Json),
             "markdown" | "md" => Ok(OutputFormat::Markdown),
+            "sarif" => Ok(OutputFormat::Sarif),
             other => Err(format!("unknown output format: {other}")),
         }
     }
@@ -389,7 +393,15 @@ mod tests {
             "md".parse::<OutputFormat>().unwrap(),
             OutputFormat::Markdown
         );
+        assert_eq!(
+            "sarif".parse::<OutputFormat>().unwrap(),
+            OutputFormat::Sarif
+        );
         assert_eq!("JSON".parse::<OutputFormat>().unwrap(), OutputFormat::Json);
+        assert_eq!(
+            "SARIF".parse::<OutputFormat>().unwrap(),
+            OutputFormat::Sarif
+        );
         assert!("xml".parse::<OutputFormat>().is_err());
     }
 
@@ -398,6 +410,7 @@ mod tests {
         assert_eq!(OutputFormat::Text.to_string(), "text");
         assert_eq!(OutputFormat::Json.to_string(), "json");
         assert_eq!(OutputFormat::Markdown.to_string(), "markdown");
+        assert_eq!(OutputFormat::Sarif.to_string(), "sarif");
     }
 
     #[test]

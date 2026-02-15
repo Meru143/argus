@@ -7,3 +7,4 @@ pub mod github;
 pub mod llm;
 pub mod pipeline;
 pub mod prompt;
+pub mod sarif;

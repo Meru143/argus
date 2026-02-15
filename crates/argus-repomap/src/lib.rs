@@ -66,5 +66,8 @@ pub fn generate_map(
         OutputFormat::Text => Ok(output::format_tree(&selected)),
         OutputFormat::Json => output::format_json(&selected),
         OutputFormat::Markdown => Ok(output::format_markdown(&selected)),
+        OutputFormat::Sarif => Err(ArgusError::Config(
+            "SARIF output is only supported for the review subcommand.".into(),
+        )),
     }
 }
