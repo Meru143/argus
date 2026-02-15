@@ -120,6 +120,9 @@ enum Command {
         /// Exit with non-zero code if findings of this severity or higher are found
         #[arg(long)]
         fail_on: Option<Severity>,
+        /// Show comments that were filtered out, with reasons
+        #[arg(long)]
+        show_filtered: bool,
     },
     /// Start the MCP server for IDE integration
     Mcp {
@@ -528,6 +531,7 @@ async fn main() -> Result<()> {
             ref skip_pattern,
             include_suggestions,
             fail_on,
+            show_filtered,
         } => {
             let diff_input = if let Some(pr_ref) = pr {
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
@@ -601,6 +605,27 @@ async fn main() -> Result<()> {
                 OutputFormat::Text => {
                     print!("{result}");
                 }
+            }
+
+            if show_filtered && !result.filtered_comments.is_empty() {
+                eprintln!("\n--- Filtered Comments ---");
+                for fc in &result.filtered_comments {
+                    let label = match fc.comment.severity {
+                        argus_core::Severity::Bug => "BUG",
+                        argus_core::Severity::Warning => "WARNING",
+                        argus_core::Severity::Suggestion => "SUGGESTION",
+                        argus_core::Severity::Info => "INFO",
+                    };
+                    eprintln!(
+                        "FILTERED: {} | [{label}] {}:{} (confidence: {:.0}%)",
+                        fc.reason,
+                        fc.comment.file_path.display(),
+                        fc.comment.line,
+                        fc.comment.confidence,
+                    );
+                    eprintln!("  {}", fc.comment.message);
+                }
+                eprintln!("-------------------------");
             }
 
             if post_comments {
