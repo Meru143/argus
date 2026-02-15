@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
-use argus_core::{ArgusError, OutputFormat, ReviewComment, ReviewConfig, Severity};
+use argus_core::{ArgusError, OutputFormat, ReviewComment, ReviewConfig, Rule, Severity};
 use serde::Serialize;
 
 use argus_difflens::filter::{DiffFilter, SkippedFile};
@@ -65,6 +65,7 @@ pub struct ReviewResult {
 ///         message: "minor note".into(),
 ///         confidence: 95.0,
 ///         suggestion: None,
+///         rule: None,
 ///     },
 ///     reason: "below confidence threshold".into(),
 /// };
@@ -134,12 +135,13 @@ pub struct ReviewStats {
 pub struct ReviewPipeline {
     llm: LlmClient,
     config: ReviewConfig,
+    rules: Vec<Rule>,
 }
 
 impl ReviewPipeline {
-    /// Create a new pipeline from an LLM client and review config.
-    pub fn new(llm: LlmClient, config: ReviewConfig) -> Self {
-        Self { llm, config }
+    /// Create a new pipeline from an LLM client, review config, and custom rules.
+    pub fn new(llm: LlmClient, config: ReviewConfig, rules: Vec<Rule>) -> Self {
+        Self { llm, config, rules }
     }
 
     /// Run a review on parsed diffs and return filtered comments.
@@ -225,7 +227,7 @@ impl ReviewPipeline {
         let diff_text = diffs_to_text(&kept_diffs);
         let total_tokens = estimate_tokens(&diff_text);
 
-        let system = prompt::build_system_prompt(&self.config);
+        let system = prompt::build_system_prompt(&self.config, &self.rules);
         let mut all_comments = Vec::new();
         let mut llm_calls: usize = 0;
         let mut file_groups: Vec<Vec<String>> = Vec::new();
@@ -305,6 +307,9 @@ impl ReviewPipeline {
         }
 
         let comments_generated = all_comments.len();
+
+        // Tag comments that match custom rules
+        tag_rule_matches(&mut all_comments, &self.rules);
 
         // 3. Deduplicate
         let (deduped, comments_deduplicated) = deduplicate(all_comments);
@@ -472,6 +477,21 @@ fn severity_rank(s: Severity) -> u8 {
         Severity::Warning => 1,
         Severity::Suggestion => 2,
         Severity::Info => 3,
+    }
+}
+
+/// Tag comments that reference a custom rule by name.
+///
+/// Checks if any rule name appears in the comment's message
+/// and sets the `rule` field on matching comments.
+fn tag_rule_matches(comments: &mut [ReviewComment], rules: &[Rule]) {
+    for comment in comments.iter_mut() {
+        for rule in rules {
+            if comment.message.contains(&rule.name) {
+                comment.rule = Some(rule.name.clone());
+                break;
+            }
+        }
     }
 }
 
@@ -648,13 +668,23 @@ impl fmt::Display for ReviewResult {
                     Severity::Suggestion => "SUGGESTION",
                     Severity::Info => "INFO",
                 };
-                writeln!(
-                    f,
-                    "[{label}] {}:{} (confidence: {:.0}%)",
-                    c.file_path.display(),
-                    c.line,
-                    c.confidence,
-                )?;
+                if let Some(rule) = &c.rule {
+                    writeln!(
+                        f,
+                        "[{label}] {}:{} (confidence: {:.0}%, rule: {rule})",
+                        c.file_path.display(),
+                        c.line,
+                        c.confidence,
+                    )?;
+                } else {
+                    writeln!(
+                        f,
+                        "[{label}] {}:{} (confidence: {:.0}%)",
+                        c.file_path.display(),
+                        c.line,
+                        c.confidence,
+                    )?;
+                }
                 writeln!(f, "  {}", c.message)?;
                 if let Some(s) = &c.suggestion {
                     writeln!(f, "  Suggestion: {s}")?;
@@ -725,12 +755,21 @@ impl ReviewResult {
                     Severity::Suggestion => "Suggestion",
                     Severity::Info => "Info",
                 };
-                out.push_str(&format!(
-                    "## {emoji} {label} — `{}:{}` ({:.0}%)\n\n",
-                    c.file_path.display(),
-                    c.line,
-                    c.confidence,
-                ));
+                if let Some(rule) = &c.rule {
+                    out.push_str(&format!(
+                        "## {emoji} {label} — `{}:{}` ({:.0}%, rule: {rule})\n\n",
+                        c.file_path.display(),
+                        c.line,
+                        c.confidence,
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "## {emoji} {label} — `{}:{}` ({:.0}%)\n\n",
+                        c.file_path.display(),
+                        c.line,
+                        c.confidence,
+                    ));
+                }
                 out.push_str(&format!("{}\n\n", c.message));
                 if let Some(s) = &c.suggestion {
                     out.push_str(&format!("> **Suggestion:** {s}\n\n"));
@@ -755,6 +794,7 @@ mod tests {
                 message: "info comment".into(),
                 confidence: 95.0,
                 suggestion: None,
+                rule: None,
             },
             ReviewComment {
                 file_path: PathBuf::from("b.rs"),
@@ -763,6 +803,7 @@ mod tests {
                 message: "real bug".into(),
                 confidence: 98.0,
                 suggestion: Some("fix it".into()),
+                rule: None,
             },
             ReviewComment {
                 file_path: PathBuf::from("c.rs"),
@@ -771,6 +812,7 @@ mod tests {
                 message: "potential issue".into(),
                 confidence: 85.0,
                 suggestion: None,
+                rule: None,
             },
             ReviewComment {
                 file_path: PathBuf::from("d.rs"),
@@ -779,6 +821,7 @@ mod tests {
                 message: "low confidence bug".into(),
                 confidence: 50.0,
                 suggestion: None,
+                rule: None,
             },
         ]
     }
@@ -865,6 +908,7 @@ mod tests {
                 message: "null deref".into(),
                 confidence: 85.0,
                 suggestion: None,
+                rule: None,
             },
             ReviewComment {
                 file_path: PathBuf::from("a.rs"),
@@ -873,6 +917,7 @@ mod tests {
                 message: "null deref".into(),
                 confidence: 95.0,
                 suggestion: None,
+                rule: None,
             },
             ReviewComment {
                 file_path: PathBuf::from("b.rs"),
@@ -881,6 +926,7 @@ mod tests {
                 message: "different issue".into(),
                 confidence: 90.0,
                 suggestion: None,
+                rule: None,
             },
         ];
         let (deduped, count) = deduplicate(comments);
@@ -910,6 +956,7 @@ mod tests {
                 message: "test bug".into(),
                 confidence: 99.0,
                 suggestion: Some("fix it".into()),
+                rule: None,
             }],
             filtered_comments: vec![],
             stats: ReviewStats {
@@ -1013,5 +1060,37 @@ mod tests {
         let groups = group_related_diffs(&diffs, 100_000);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].len(), 2);
+    }
+
+    #[test]
+    fn tag_rule_matches_sets_rule_field() {
+        let rules = vec![Rule {
+            name: "no-unwrap".into(),
+            severity: "warning".into(),
+            description: "Don't use unwrap".into(),
+        }];
+        let mut comments = vec![
+            ReviewComment {
+                file_path: PathBuf::from("a.rs"),
+                line: 10,
+                severity: Severity::Warning,
+                message: "Using .unwrap() violates no-unwrap rule".into(),
+                confidence: 95.0,
+                suggestion: None,
+                rule: None,
+            },
+            ReviewComment {
+                file_path: PathBuf::from("b.rs"),
+                line: 20,
+                severity: Severity::Bug,
+                message: "Null pointer dereference".into(),
+                confidence: 90.0,
+                suggestion: None,
+                rule: None,
+            },
+        ];
+        tag_rule_matches(&mut comments, &rules);
+        assert_eq!(comments[0].rule.as_deref(), Some("no-unwrap"));
+        assert!(comments[1].rule.is_none());
     }
 }

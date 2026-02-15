@@ -10,7 +10,7 @@ mod config;
 mod error;
 mod types;
 
-pub use config::{ArgusConfig, EmbeddingConfig, LlmConfig, PathConfig, ReviewConfig};
+pub use config::{ArgusConfig, EmbeddingConfig, LlmConfig, PathConfig, ReviewConfig, Rule};
 pub use error::ArgusError;
 pub use types::{
     ChangeType, DiffHunk, FileNode, OutputFormat, ReviewComment, RiskScore, SearchResult, Severity,

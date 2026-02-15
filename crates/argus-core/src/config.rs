@@ -6,6 +6,33 @@ use serde::{Deserialize, Serialize};
 use crate::error::ArgusError;
 use crate::types::Severity;
 
+/// A custom review rule defined in `.argus.toml`.
+///
+/// Rules are injected into the LLM system prompt so the reviewer
+/// checks for project-specific patterns.
+///
+/// # Examples
+///
+/// ```
+/// use argus_core::Rule;
+///
+/// let rule = Rule {
+///     name: "no-unwrap".into(),
+///     severity: "warning".into(),
+///     description: "Do not use .unwrap() in production code".into(),
+/// };
+/// assert_eq!(rule.name, "no-unwrap");
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Rule {
+    /// Short identifier for the rule (used in output).
+    pub name: String,
+    /// Severity level: "bug", "warning", or "suggestion".
+    pub severity: String,
+    /// Natural language instruction for the LLM.
+    pub description: String,
+}
+
 /// Top-level configuration loaded from `.argus.toml`.
 ///
 /// Supports layered resolution: CLI flags > env vars > local config > defaults.
@@ -32,6 +59,9 @@ pub struct ArgusConfig {
     /// Per-path overrides for monorepo support.
     #[serde(default)]
     pub paths: HashMap<String, PathConfig>,
+    /// Custom review rules injected into the LLM prompt.
+    #[serde(default)]
+    pub rules: Vec<Rule>,
 }
 
 impl ArgusConfig {
@@ -384,5 +414,35 @@ max_comments = 10
         assert!(config.review.skip_extensions.is_empty());
         assert_eq!(config.review.max_diff_tokens, 4000);
         assert!(!config.review.include_suggestions);
+    }
+
+    #[test]
+    fn parse_rules_from_toml() {
+        let toml = r#"
+[[rules]]
+name = "no-unwrap"
+severity = "warning"
+description = "Do not use .unwrap() in production code"
+
+[[rules]]
+name = "no-todo"
+severity = "suggestion"
+description = "Remove TODO comments before merging"
+"#;
+        let config = ArgusConfig::from_toml(toml).unwrap();
+        assert_eq!(config.rules.len(), 2);
+        assert_eq!(config.rules[0].name, "no-unwrap");
+        assert_eq!(config.rules[0].severity, "warning");
+        assert_eq!(
+            config.rules[0].description,
+            "Do not use .unwrap() in production code"
+        );
+        assert_eq!(config.rules[1].name, "no-todo");
+        assert_eq!(config.rules[1].severity, "suggestion");
+    }
+
+    #[test]
+    fn empty_rules_by_default() {
+        assert!(ArgusConfig::default().rules.is_empty());
     }
 }

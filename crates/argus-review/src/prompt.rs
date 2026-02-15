@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 
-use argus_core::{ArgusError, ReviewComment, ReviewConfig, Severity};
+use argus_core::{ArgusError, ReviewComment, ReviewConfig, Rule, Severity};
 use serde::Deserialize;
 
 /// Build the system prompt for the code review LLM.
 ///
 /// Incorporates `max_comments` and severity configuration from [`ReviewConfig`]
-/// into the prompt text for better LLM adherence.
+/// into the prompt text for better LLM adherence. When `rules` is non-empty,
+/// appends a project-specific rules section so the LLM checks for custom
+/// patterns defined by the project maintainers.
 ///
 /// # Examples
 ///
@@ -15,18 +17,18 @@ use serde::Deserialize;
 /// use argus_review::prompt::build_system_prompt;
 ///
 /// let config = ReviewConfig::default();
-/// let prompt = build_system_prompt(&config);
+/// let prompt = build_system_prompt(&config, &[]);
 /// assert!(prompt.contains("Argus"));
 /// assert!(prompt.contains("Maximum 5 comments"));
 /// ```
-pub fn build_system_prompt(config: &ReviewConfig) -> String {
+pub fn build_system_prompt(config: &ReviewConfig, rules: &[Rule]) -> String {
     let severity_note = if config.include_suggestions {
         "- suggestion: Improvement that doesn't affect correctness"
     } else {
         "- suggestion: Improvement that doesn't affect correctness (ONLY include if explicitly enabled)"
     };
 
-    format!(
+    let mut prompt = format!(
         "You are Argus, an expert code reviewer specializing in detecting genuine defects in code changes.\n\
          \n\
          RULES — FOLLOW STRICTLY:\n\
@@ -61,7 +63,28 @@ pub fn build_system_prompt(config: &ReviewConfig) -> String {
          \n\
          If you find no issues worth reporting, return: {{\"comments\": []}}",
         max_comments = config.max_comments,
-    )
+    );
+
+    if !rules.is_empty() {
+        let mut sorted_rules: Vec<&Rule> = rules.iter().collect();
+        sorted_rules.sort_by_key(|r| match r.severity.as_str() {
+            "bug" => 0u8,
+            "warning" => 1,
+            "suggestion" => 2,
+            _ => 3,
+        });
+
+        prompt.push_str("\n\n## Project-Specific Rules\n\n");
+        prompt.push_str("The following rules are defined by the project maintainers. Check for violations of each rule and report them with the specified severity.\n\n");
+        for rule in &sorted_rules {
+            prompt.push_str(&format!(
+                "- [{}] {}: {}\n",
+                rule.severity, rule.name, rule.description
+            ));
+        }
+    }
+
+    prompt
 }
 
 /// Build the user prompt containing the diff to review.
@@ -201,6 +224,7 @@ pub fn parse_review_response(response: &str) -> Result<Vec<ReviewComment>, Argus
             message: c.message.clone(),
             confidence,
             suggestion: c.suggestion.clone(),
+            rule: None,
         });
     }
 
@@ -229,7 +253,7 @@ mod tests {
     #[test]
     fn system_prompt_contains_key_instructions() {
         let config = ReviewConfig::default();
-        let prompt = build_system_prompt(&config);
+        let prompt = build_system_prompt(&config, &[]);
         assert!(prompt.contains("CERTAIN"));
         assert!(prompt.contains("line number"));
         assert!(prompt.contains("comments"));
@@ -242,7 +266,7 @@ mod tests {
             max_comments: 10,
             ..ReviewConfig::default()
         };
-        let prompt = build_system_prompt(&config);
+        let prompt = build_system_prompt(&config, &[]);
         assert!(prompt.contains("Maximum 10 comments"));
     }
 
@@ -252,7 +276,7 @@ mod tests {
             include_suggestions: true,
             ..ReviewConfig::default()
         };
-        let prompt = build_system_prompt(&config);
+        let prompt = build_system_prompt(&config, &[]);
         // Should NOT contain the restriction about "ONLY include if explicitly enabled"
         assert!(!prompt.contains("ONLY include if explicitly enabled"));
     }
@@ -377,5 +401,66 @@ mod tests {
         ]}"#;
         let comments = parse_review_response(json).unwrap();
         assert_eq!(comments[0].confidence, 100.0);
+    }
+
+    #[test]
+    fn system_prompt_includes_rules() {
+        let config = ReviewConfig::default();
+        let rules = vec![
+            Rule {
+                name: "no-unwrap".into(),
+                severity: "warning".into(),
+                description: "Do not use .unwrap() in production code".into(),
+            },
+            Rule {
+                name: "no-panic".into(),
+                severity: "bug".into(),
+                description: "Never use panic! in library code".into(),
+            },
+        ];
+        let prompt = build_system_prompt(&config, &rules);
+        assert!(prompt.contains("Project-Specific Rules"));
+        assert!(prompt.contains("no-unwrap"));
+        assert!(prompt.contains("no-panic"));
+        assert!(prompt.contains("Do not use .unwrap() in production code"));
+        assert!(prompt.contains("Never use panic! in library code"));
+    }
+
+    #[test]
+    fn system_prompt_no_rules_section_when_empty() {
+        let config = ReviewConfig::default();
+        let prompt = build_system_prompt(&config, &[]);
+        assert!(!prompt.contains("Project-Specific Rules"));
+    }
+
+    #[test]
+    fn system_prompt_rules_sorted_by_severity() {
+        let config = ReviewConfig::default();
+        let rules = vec![
+            Rule {
+                name: "style-check".into(),
+                severity: "suggestion".into(),
+                description: "Check style".into(),
+            },
+            Rule {
+                name: "warn-check".into(),
+                severity: "warning".into(),
+                description: "Check warnings".into(),
+            },
+            Rule {
+                name: "critical-bug".into(),
+                severity: "bug".into(),
+                description: "Check bugs".into(),
+            },
+        ];
+        let prompt = build_system_prompt(&config, &rules);
+        let bug_pos = prompt.find("critical-bug").unwrap();
+        let warn_pos = prompt.find("warn-check").unwrap();
+        let suggestion_pos = prompt.find("style-check").unwrap();
+        assert!(bug_pos < warn_pos, "bug should appear before warning");
+        assert!(
+            warn_pos < suggestion_pos,
+            "warning should appear before suggestion"
+        );
     }
 }

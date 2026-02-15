@@ -182,6 +182,12 @@ const DEFAULT_CONFIG: &str = r#"# Argus Configuration
 [history]
 # since_days = 180
 # max_files_per_commit = 25
+
+# Custom review rules (injected into LLM prompt)
+# [[rules]]
+# name = "no-unwrap"
+# severity = "warning"
+# description = "Do not use .unwrap() in production code"
 "#;
 
 #[tokio::main]
@@ -202,6 +208,26 @@ async fn main() -> Result<()> {
 
     if cli.verbose {
         eprintln!("format: {}", cli.format);
+        if !config.rules.is_empty() {
+            let bugs = config.rules.iter().filter(|r| r.severity == "bug").count();
+            let warnings = config
+                .rules
+                .iter()
+                .filter(|r| r.severity == "warning")
+                .count();
+            let suggestions = config
+                .rules
+                .iter()
+                .filter(|r| r.severity == "suggestion")
+                .count();
+            eprintln!(
+                "Custom rules: {} loaded ({} bug, {} warning, {} suggestion)",
+                config.rules.len(),
+                bugs,
+                warnings,
+                suggestions,
+            );
+        }
     }
 
     match cli.command {
@@ -563,7 +589,7 @@ async fn main() -> Result<()> {
             }
 
             let llm_client = argus_review::llm::LlmClient::new(&config.llm)?;
-            let pipeline = argus_review::pipeline::ReviewPipeline::new(llm_client, review_config);
+            let pipeline = argus_review::pipeline::ReviewPipeline::new(llm_client, review_config, config.rules.clone());
             let result = pipeline.review(&diffs, repo.as_deref()).await?;
 
             // Verbose output
