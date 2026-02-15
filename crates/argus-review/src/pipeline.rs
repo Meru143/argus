@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::io::IsTerminal;
 use std::path::Path;
 
 use argus_core::{ArgusError, OutputFormat, ReviewComment, ReviewConfig, Rule, Severity};
@@ -250,7 +251,16 @@ impl ReviewPipeline {
                 file_groups.push(names);
             }
 
-            for group in &groups {
+            let is_tty = std::io::stderr().is_terminal();
+            let group_count = groups.len();
+            if is_tty {
+                let file_count: usize = groups.iter().map(|g| g.len()).sum();
+                eprintln!(
+                    "Reviewing... ({file_count} files, {group_count} groups)"
+                );
+            }
+
+            for (i, group) in groups.iter().enumerate() {
                 let group_diff_text = diffs_to_text(group);
                 let is_cross_file = group.len() > 1;
                 let user = prompt::build_review_prompt(
@@ -276,10 +286,39 @@ impl ReviewPipeline {
                 let response = self.llm.chat(messages).await?;
                 llm_calls += 1;
                 let mut parsed = prompt::parse_review_response(&response)?;
+                if is_tty {
+                    let label = group_display_name(group.as_slice());
+                    let file_label = if group.len() == 1 { "file" } else { "files" };
+                    let comment_label = if parsed.len() == 1 {
+                        "comment"
+                    } else {
+                        "comments"
+                    };
+                    eprintln!(
+                        "  [{}/{}] {label} ({} {file_label})... {} {comment_label}",
+                        i + 1,
+                        group_count,
+                        group.len(),
+                        parsed.len(),
+                    );
+                }
                 all_comments.append(&mut parsed);
             }
         } else {
             // Single LLM call
+            let is_tty = std::io::stderr().is_terminal();
+            if is_tty {
+                let file_label = if kept_diffs.len() == 1 {
+                    "file"
+                } else {
+                    "files"
+                };
+                eprintln!(
+                    "Reviewing... ({} {file_label}, 1 group)",
+                    kept_diffs.len(),
+                );
+            }
+
             let is_cross_file = kept_diffs.len() > 1;
             let user = prompt::build_review_prompt(
                 &diff_text,
@@ -304,6 +343,17 @@ impl ReviewPipeline {
             let response = self.llm.chat(messages).await?;
             llm_calls = 1;
             all_comments = prompt::parse_review_response(&response)?;
+            if is_tty {
+                let comment_label = if all_comments.len() == 1 {
+                    "comment"
+                } else {
+                    "comments"
+                };
+                eprintln!(
+                    "  [1/1] all files... {} {comment_label}",
+                    all_comments.len(),
+                );
+            }
         }
 
         let comments_generated = all_comments.len();
@@ -317,6 +367,15 @@ impl ReviewPipeline {
         // 4. Filter and sort
         let (final_comments, filtered_comments) = filter_and_sort(deduped, &self.config);
         let comments_filtered = filtered_comments.len();
+
+        if std::io::stderr().is_terminal() {
+            eprintln!(
+                "Done. {} comments ({} filtered, {} deduped)",
+                final_comments.len(),
+                comments_filtered,
+                comments_deduplicated,
+            );
+        }
 
         Ok(ReviewResult {
             comments: final_comments,
@@ -400,6 +459,71 @@ fn group_related_diffs<'a>(
         }
     }
     result
+}
+
+/// Build a human-readable label for a group of diffs.
+///
+/// Single-file groups show the filename. Multi-file groups sharing a
+/// directory show the directory path. Mixed groups show the first few
+/// filenames joined by commas.
+fn group_display_name<D: std::borrow::Borrow<FileDiff>>(group: &[D]) -> String {
+    if group.len() == 1 {
+        let path = &group[0].borrow().new_path;
+        return path
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    }
+
+    let paths: Vec<&Path> = group
+        .iter()
+        .map(|d| d.borrow().new_path.as_path())
+        .collect();
+
+    if let Some(common) = common_directory(&paths) {
+        let display = common.to_string_lossy();
+        if display.is_empty() {
+            // Root-level files, fall through to filename list
+        } else {
+            return format!("{display}/");
+        }
+    }
+
+    let names: Vec<String> = group
+        .iter()
+        .take(3)
+        .map(|d| {
+            d.borrow()
+                .new_path
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        })
+        .collect();
+    if group.len() > 3 {
+        format!("{}, ...", names.join(", "))
+    } else {
+        names.join(", ")
+    }
+}
+
+/// Find the common parent directory of a set of paths.
+///
+/// Returns `None` if paths share no common directory (including when the
+/// common prefix is the empty path, i.e. root-level files).
+fn common_directory<'a>(paths: &'a [&'a Path]) -> Option<&'a Path> {
+    let first = paths.first()?;
+    let mut common = first.parent()?;
+    for path in &paths[1..] {
+        while !path.starts_with(common) {
+            common = common.parent()?;
+        }
+    }
+    // Empty string means root — treat as "no common directory"
+    if common.as_os_str().is_empty() {
+        return None;
+    }
+    Some(common)
 }
 
 fn deduplicate(comments: Vec<ReviewComment>) -> (Vec<ReviewComment>, usize) {
@@ -1092,5 +1216,77 @@ mod tests {
         tag_rule_matches(&mut comments, &rules);
         assert_eq!(comments[0].rule.as_deref(), Some("no-unwrap"));
         assert!(comments[1].rule.is_none());
+    }
+
+    #[test]
+    fn group_display_name_single_file() {
+        let diffs = vec![make_file_diff("crates/argus-review/src/pipeline.rs", "+a\n")];
+        let refs: Vec<&FileDiff> = diffs.iter().collect();
+        assert_eq!(group_display_name(&refs), "pipeline.rs");
+    }
+
+    #[test]
+    fn group_display_name_same_directory() {
+        let diffs = vec![
+            make_file_diff("src/pipeline.rs", "+a\n"),
+            make_file_diff("src/prompt.rs", "+b\n"),
+        ];
+        let refs: Vec<&FileDiff> = diffs.iter().collect();
+        assert_eq!(group_display_name(&refs), "src/");
+    }
+
+    #[test]
+    fn group_display_name_mixed_directories() {
+        let diffs = vec![
+            make_file_diff("README.md", "+a\n"),
+            make_file_diff("Cargo.toml", "+b\n"),
+        ];
+        let refs: Vec<&FileDiff> = diffs.iter().collect();
+        // Root-level files have no common directory — shows filenames
+        let name = group_display_name(&refs);
+        assert!(name.contains("README.md"));
+        assert!(name.contains("Cargo.toml"));
+    }
+
+    #[test]
+    fn common_directory_same_parent() {
+        let a = Path::new("src/a.rs");
+        let b = Path::new("src/b.rs");
+        let paths = [a, b];
+        let result = common_directory(&paths);
+        assert_eq!(result, Some(Path::new("src")));
+    }
+
+    #[test]
+    fn common_directory_nested() {
+        let a = Path::new("crates/core/src/lib.rs");
+        let b = Path::new("crates/core/src/types.rs");
+        let paths = [a, b];
+        let result = common_directory(&paths);
+        assert_eq!(result, Some(Path::new("crates/core/src")));
+    }
+
+    #[test]
+    fn common_directory_no_common() {
+        let a = Path::new("README.md");
+        let b = Path::new("Cargo.toml");
+        let paths = [a, b];
+        let result = common_directory(&paths);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn common_directory_divergent_trees() {
+        let a = Path::new("crates/core/src/lib.rs");
+        let b = Path::new("crates/review/src/lib.rs");
+        let paths = [a, b];
+        let result = common_directory(&paths);
+        assert_eq!(result, Some(Path::new("crates")));
+    }
+
+    #[test]
+    fn common_directory_empty_input() {
+        let result = common_directory(&[]);
+        assert!(result.is_none());
     }
 }
