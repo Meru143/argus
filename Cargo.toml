@@ -15,6 +15,17 @@ edition = "2021"
 version = "0.1.0"
 license = "MIT"
 
+[workspace.metadata.dist]
+cargo-dist-version = "0.27"
+ci = "github"
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
 [workspace.dependencies]
 argus-core = { path = "crates/argus-core" }
 argus-repomap = { path = "crates/argus-repomap" }
@@ -64,3 +75,8 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+toml = { workspace = true }
+argus-core = { workspace = true }

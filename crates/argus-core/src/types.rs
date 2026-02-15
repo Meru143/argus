@@ -207,6 +207,48 @@ impl fmt::Display for Severity {
     }
 }
 
+impl FromStr for Severity {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "bug" => Ok(Severity::Bug),
+            "warning" => Ok(Severity::Warning),
+            "suggestion" => Ok(Severity::Suggestion),
+            "info" => Ok(Severity::Info),
+            other => Err(format!("unknown severity: {other}")),
+        }
+    }
+}
+
+impl Severity {
+    /// Returns `true` if `self` is at least as severe as `threshold`.
+    ///
+    /// Severity order: Bug > Warning > Suggestion > Info.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use argus_core::Severity;
+    ///
+    /// assert!(Severity::Bug.meets_threshold(Severity::Warning));
+    /// assert!(Severity::Warning.meets_threshold(Severity::Warning));
+    /// assert!(!Severity::Suggestion.meets_threshold(Severity::Warning));
+    /// ```
+    pub fn meets_threshold(self, threshold: Severity) -> bool {
+        self.rank() <= threshold.rank()
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            Severity::Bug => 0,
+            Severity::Warning => 1,
+            Severity::Suggestion => 2,
+            Severity::Info => 3,
+        }
+    }
+}
+
 /// A single review comment produced by the AI reviewer.
 ///
 /// # Examples
@@ -388,6 +430,30 @@ mod tests {
 
         let parsed: Severity = serde_json::from_str("\"warning\"").unwrap();
         assert_eq!(parsed, Severity::Warning);
+    }
+
+    #[test]
+    fn severity_from_str() {
+        assert_eq!("bug".parse::<Severity>().unwrap(), Severity::Bug);
+        assert_eq!("Warning".parse::<Severity>().unwrap(), Severity::Warning);
+        assert_eq!(
+            "SUGGESTION".parse::<Severity>().unwrap(),
+            Severity::Suggestion
+        );
+        assert_eq!("info".parse::<Severity>().unwrap(), Severity::Info);
+        assert!("unknown".parse::<Severity>().is_err());
+    }
+
+    #[test]
+    fn severity_meets_threshold() {
+        assert!(Severity::Bug.meets_threshold(Severity::Bug));
+        assert!(Severity::Bug.meets_threshold(Severity::Warning));
+        assert!(Severity::Bug.meets_threshold(Severity::Suggestion));
+        assert!(Severity::Warning.meets_threshold(Severity::Warning));
+        assert!(Severity::Warning.meets_threshold(Severity::Suggestion));
+        assert!(!Severity::Warning.meets_threshold(Severity::Bug));
+        assert!(!Severity::Suggestion.meets_threshold(Severity::Bug));
+        assert!(!Severity::Suggestion.meets_threshold(Severity::Warning));
     }
 
     #[test]
