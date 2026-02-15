@@ -118,9 +118,21 @@ impl HybridSearch {
     /// # }
     /// ```
     pub async fn index_repo(&self, root: &Path) -> Result<IndexStats, ArgusError> {
-        // Record embedding dimensions for consistency checking
-        self.index
-            .set_dimensions(self.embedding_client.default_dimensions())?;
+        // Check or set embedding dimensions for consistency
+        let expected_dims = self.embedding_client.default_dimensions();
+        match self.index.get_dimensions()? {
+            Some(stored) => {
+                if stored != expected_dims {
+                    return Err(ArgusError::Config(format!(
+                        "Index has {stored} dimensions but embedding config specifies {expected_dims}. \
+                         Re-index with --index to rebuild."
+                    )));
+                }
+            }
+            None => {
+                self.index.set_dimensions(expected_dims)?;
+            }
+        }
 
         let files = argus_repomap::walker::walk_repo(root)?;
         let mut all_chunks = Vec::new();
@@ -175,9 +187,21 @@ impl HybridSearch {
     /// # }
     /// ```
     pub async fn reindex_repo(&self, root: &Path) -> Result<IndexStats, ArgusError> {
-        // Verify dimensions match existing index
-        self.index
-            .set_dimensions(self.embedding_client.default_dimensions())?;
+        // Check or set embedding dimensions for consistency
+        let expected_dims = self.embedding_client.default_dimensions();
+        match self.index.get_dimensions()? {
+            Some(stored) => {
+                if stored != expected_dims {
+                    return Err(ArgusError::Config(format!(
+                        "Index has {stored} dimensions but embedding config specifies {expected_dims}. \
+                         Re-index with --index to rebuild."
+                    )));
+                }
+            }
+            None => {
+                self.index.set_dimensions(expected_dims)?;
+            }
+        }
 
         let files = argus_repomap::walker::walk_repo(root)?;
         let existing_paths = self.index.indexed_files()?;
