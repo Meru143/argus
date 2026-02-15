@@ -35,7 +35,19 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Generate a ranked map of the codebase structure
-    Map,
+    Map {
+        /// Repository path (default: current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Maximum tokens for the map (default: 1024)
+        #[arg(long, default_value = "1024")]
+        max_tokens: usize,
+
+        /// Focus files (boost ranking for symbols in these files)
+        #[arg(long)]
+        focus: Vec<PathBuf>,
+    },
     /// Analyze diffs and compute risk scores
     Diff {
         /// Read diff from file instead of stdin
@@ -57,6 +69,9 @@ enum Command {
         /// Post comments to GitHub PR
         #[arg(long)]
         post_comments: bool,
+        /// Repository path for codebase context (enables repo map)
+        #[arg(long)]
+        repo: Option<PathBuf>,
     },
     /// Start the MCP server for IDE integration
     Mcp,
@@ -98,8 +113,13 @@ async fn main() -> Result<()> {
     }
 
     match cli.command {
-        Command::Map => {
-            anyhow::bail!("map subcommand not yet implemented")
+        Command::Map {
+            ref path,
+            max_tokens,
+            ref focus,
+        } => {
+            let output = argus_repomap::generate_map(path, max_tokens, focus, cli.format)?;
+            print!("{output}");
         }
         Command::Diff { ref file } => {
             let input = read_diff_input(file)?;
@@ -128,6 +148,7 @@ async fn main() -> Result<()> {
             ref pr,
             ref file,
             post_comments,
+            ref repo,
         } => {
             let diff_input = if let Some(pr_ref) = pr {
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
@@ -142,7 +163,7 @@ async fn main() -> Result<()> {
             let llm_client = argus_review::llm::LlmClient::new(&config.llm)?;
             let pipeline =
                 argus_review::pipeline::ReviewPipeline::new(llm_client, config.review.clone());
-            let result = pipeline.review(&diffs).await?;
+            let result = pipeline.review(&diffs, repo.as_deref()).await?;
 
             match cli.format {
                 OutputFormat::Json => {
