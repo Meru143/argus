@@ -1,6 +1,6 @@
 {
   "name": "argus-ai",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "AI-powered code review tool — multi-provider, self-hosted, open-source",
   "license": "MIT",
   "repository": {
