@@ -12,7 +12,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.2.1"
+version = "0.2.2"
 license = "MIT"
 description = "AI code review platform — your coding agent shouldn't grade its own homework"
 repository = "https://github.com/Meru143/argus"

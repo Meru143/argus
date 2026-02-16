@@ -2,6 +2,13 @@
 
 All notable changes to Argus are documented here.
 
+## [0.2.2] — 2026-02-16
+
+### Added
+- **Welcome screen** — `argus` with no args now shows a branded welcome screen with quick start commands
+- **Contextual error hints** — user-friendly hints for common errors (missing config, no API key, not in git repo)
+- **Two-tier help** — `argus -h` for brief summary, `argus --help` for full details
+
 ## [0.2.0] — 2026-02-16
 
 ### Added
