@@ -6,3 +6,5 @@ docs/plans/
 npm/bin/argus-bin*
 npm/.npmrc
 .argus.toml
+TODO.md
+demo.tape
