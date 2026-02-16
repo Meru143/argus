@@ -345,8 +345,14 @@ mod tests {
 
     #[test]
     fn review_prompt_includes_context() {
-        let prompt =
-            build_review_prompt("+x", None, None, None, Some("This is an auth module"), false);
+        let prompt = build_review_prompt(
+            "+x",
+            None,
+            None,
+            None,
+            Some("This is an auth module"),
+            false,
+        );
         assert!(prompt.contains("auth module"));
     }
 

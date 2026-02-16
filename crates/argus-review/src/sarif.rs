@@ -200,7 +200,9 @@ mod tests {
         let results = sarif["runs"][0]["results"].as_array().unwrap();
         assert!(results.is_empty());
 
-        let rules = sarif["runs"][0]["tool"]["driver"]["rules"].as_array().unwrap();
+        let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
+            .as_array()
+            .unwrap();
         assert!(rules.is_empty());
     }
 
@@ -251,7 +253,10 @@ mod tests {
 
         assert_eq!(results[1]["ruleId"], "argus/warning");
         assert_eq!(results[1]["level"], "warning");
-        assert_eq!(results[1]["locations"][0]["physicalLocation"]["region"]["startLine"], 10);
+        assert_eq!(
+            results[1]["locations"][0]["physicalLocation"]["region"]["startLine"],
+            10
+        );
     }
 
     #[test]
@@ -281,7 +286,9 @@ mod tests {
         let result = make_result(comments);
         let sarif = to_sarif(&result);
 
-        let rules = sarif["runs"][0]["tool"]["driver"]["rules"].as_array().unwrap();
+        let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
+            .as_array()
+            .unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["id"], "argus/bug");
     }

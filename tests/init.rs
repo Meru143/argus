@@ -10,7 +10,11 @@ fn init_creates_valid_toml() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "argus init failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "argus init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let config_path = dir.path().join(".argus.toml");
     assert!(config_path.exists(), ".argus.toml should exist");

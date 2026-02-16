@@ -231,9 +231,7 @@ impl CodeIndex {
 
         if let Some(stored) = existing {
             let stored_dims: usize = stored.parse().map_err(|_| {
-                ArgusError::Database(format!(
-                    "Corrupted dimension metadata in index: '{stored}'"
-                ))
+                ArgusError::Database(format!("Corrupted dimension metadata in index: '{stored}'"))
             })?;
             if stored_dims != dimensions {
                 return Err(ArgusError::Database(format!(
@@ -257,9 +255,7 @@ impl CodeIndex {
         match value {
             Some(v) => {
                 let dims: usize = v.parse().map_err(|_| {
-                    ArgusError::Database(format!(
-                        "Corrupted dimension metadata in index: '{v}'"
-                    ))
+                    ArgusError::Database(format!("Corrupted dimension metadata in index: '{v}'"))
                 })?;
                 Ok(Some(dims))
             }

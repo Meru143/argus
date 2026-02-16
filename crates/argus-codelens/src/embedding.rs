@@ -196,9 +196,7 @@ impl EmbeddingClient {
             let provider_default = default_model(provider);
             eprintln!(
                 "warning: model '{}' is not compatible with {} provider, switching to '{}'",
-                config.model,
-                config.provider,
-                provider_default,
+                config.model, config.provider, provider_default,
             );
             provider_default.to_string()
         } else {
@@ -273,10 +271,7 @@ impl EmbeddingClient {
 
             let batch_result = match self.provider {
                 Provider::Voyage => self.embed_batch_voyage(batch, "document").await?,
-                Provider::Gemini => {
-                    self.embed_batch_gemini(batch, "RETRIEVAL_DOCUMENT")
-                        .await?
-                }
+                Provider::Gemini => self.embed_batch_gemini(batch, "RETRIEVAL_DOCUMENT").await?,
                 Provider::OpenAi => self.embed_batch_openai(batch).await?,
             };
 
@@ -380,9 +375,7 @@ impl EmbeddingClient {
             .map(|text| GeminiEmbedRequest {
                 model: format!("models/{}", self.model),
                 content: GeminiContent {
-                    parts: vec![GeminiPart {
-                        text: text.clone(),
-                    }],
+                    parts: vec![GeminiPart { text: text.clone() }],
                 },
                 task_type: task_type.to_string(),
             })
@@ -792,7 +785,10 @@ mod tests {
         assert!(is_model_compatible("text-embedding-004", Provider::Gemini));
         assert!(!is_model_compatible("voyage-code-3", Provider::Gemini));
 
-        assert!(is_model_compatible("text-embedding-3-small", Provider::OpenAi));
+        assert!(is_model_compatible(
+            "text-embedding-3-small",
+            Provider::OpenAi
+        ));
         assert!(!is_model_compatible("voyage-code-3", Provider::OpenAi));
     }
 }
