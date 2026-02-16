@@ -32,6 +32,13 @@ git diff HEAD~1 | npx argus-ai review --repo .
 
 ## Install
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap Meru143/argus
+brew install argus
+```
+
 ### npm (Recommended)
 
 ```bash
