@@ -2,8 +2,8 @@ use std::io::IsTerminal;
 use std::io::Read;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use miette::{Context, IntoDiagnostic, Result};
 
 use argus_core::{OutputFormat, Severity};
 
@@ -175,14 +175,15 @@ enum ColorChoice {
 
 fn read_diff_input(file: &Option<PathBuf>) -> Result<String> {
     match file {
-        Some(path) => {
-            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
-        }
+        Some(path) => std::fs::read_to_string(path)
+            .into_diagnostic()
+            .wrap_err(format!("reading {}", path.display())),
         None => {
             let mut input = String::new();
             std::io::stdin()
                 .read_to_string(&mut input)
-                .context("reading stdin")?;
+                .into_diagnostic()
+                .wrap_err("reading stdin")?;
             Ok(input)
         }
     }
@@ -251,7 +252,7 @@ fn run_doctor(
 
     // 1. Git repository
     let mut git_root = None;
-    let cwd = std::env::current_dir()?;
+    let cwd = std::env::current_dir().into_diagnostic()?;
     let mut dir = cwd.as_path();
     loop {
         if dir.join(".git").exists() {
@@ -381,8 +382,8 @@ fn run_doctor(
     if git_root.is_some() {
         match git2::Repository::discover(&cwd) {
             Ok(repo) => {
-                let mut revwalk = repo.revwalk()?;
-                revwalk.push_head()?;
+                let mut revwalk = repo.revwalk().into_diagnostic()?;
+                revwalk.push_head().into_diagnostic()?;
                 let since = chrono_days_ago(180);
                 let mut count = 0u64;
                 for oid in revwalk {
@@ -417,7 +418,7 @@ fn run_doctor(
                 "version": version,
                 "checks": checks,
             });
-            println!("{}", serde_json::to_string_pretty(&json)?);
+            println!("{}", serde_json::to_string_pretty(&json).into_diagnostic()?);
         }
         _ => {
             let version = env!("CARGO_PKG_VERSION");
@@ -487,6 +488,16 @@ const DEFAULT_CONFIG: &str = r#"# Argus Configuration
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    miette::set_hook(Box::new(|_| {
+        Box::new(
+            miette::MietteHandlerOpts::new()
+                .terminal_links(true)
+                .build(),
+        )
+    }))
+    .expect("miette handler");
+    human_panic::setup_panic!();
+
     let cli = Cli::parse();
 
     let config = match &cli.config {
@@ -542,7 +553,7 @@ async fn main() -> Result<()> {
         }
         Command::Diff { ref file } => {
             if cli.format == OutputFormat::Sarif {
-                anyhow::bail!("SARIF output is only supported for the review subcommand.");
+                miette::bail!("SARIF output is only supported for the review subcommand.");
             }
             let input = read_diff_input(file)?;
             let diffs = argus_difflens::parser::parse_unified_diff(&input)?;
@@ -550,7 +561,10 @@ async fn main() -> Result<()> {
 
             match cli.format {
                 OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&report)?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&report).into_diagnostic()?
+                    );
                 }
                 OutputFormat::Markdown => {
                     print!("{}", report.to_markdown());
@@ -569,7 +583,7 @@ async fn main() -> Result<()> {
             reindex,
         } => {
             if cli.format == OutputFormat::Sarif {
-                anyhow::bail!("SARIF output is only supported for the review subcommand.");
+                miette::bail!("SARIF output is only supported for the review subcommand.");
             }
             let index_path = path.join(".argus/index.db");
 
@@ -602,7 +616,10 @@ async fn main() -> Result<()> {
 
                 match cli.format {
                     OutputFormat::Json => {
-                        println!("{}", serde_json::to_string_pretty(&results)?);
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&results).into_diagnostic()?
+                        );
                     }
                     OutputFormat::Markdown => {
                         if results.is_empty() {
@@ -651,7 +668,7 @@ async fn main() -> Result<()> {
                     OutputFormat::Sarif => unreachable!(),
                 }
             } else if !index && !reindex {
-                anyhow::bail!("provide a search query, or use --index / --reindex");
+                miette::bail!("provide a search query, or use --index / --reindex");
             }
         }
         Command::History {
@@ -662,7 +679,7 @@ async fn main() -> Result<()> {
             min_coupling,
         } => {
             if cli.format == OutputFormat::Sarif {
-                anyhow::bail!("SARIF output is only supported for the review subcommand.");
+                miette::bail!("SARIF output is only supported for the review subcommand.");
             }
             let options = argus_gitpulse::mining::MiningOptions {
                 since_days: since,
@@ -695,22 +712,32 @@ async fn main() -> Result<()> {
                     if show_hotspots {
                         let hotspots = argus_gitpulse::hotspots::detect_hotspots(path, &commits)?;
                         let top: Vec<_> = hotspots.into_iter().take(limit).collect();
-                        json.insert("hotspots".into(), serde_json::to_value(&top)?);
+                        json.insert(
+                            "hotspots".into(),
+                            serde_json::to_value(&top).into_diagnostic()?,
+                        );
                     }
                     if show_coupling {
                         let coupling =
                             argus_gitpulse::coupling::detect_coupling(&commits, min_coupling, 3)?;
                         let top: Vec<_> = coupling.into_iter().take(limit).collect();
-                        json.insert("coupling".into(), serde_json::to_value(&top)?);
+                        json.insert(
+                            "coupling".into(),
+                            serde_json::to_value(&top).into_diagnostic()?,
+                        );
                     }
                     if show_ownership {
                         let ownership = argus_gitpulse::ownership::analyze_ownership(&commits)?;
-                        json.insert("ownership".into(), serde_json::to_value(&ownership)?);
+                        json.insert(
+                            "ownership".into(),
+                            serde_json::to_value(&ownership).into_diagnostic()?,
+                        );
                     }
 
                     println!(
                         "{}",
-                        serde_json::to_string_pretty(&serde_json::Value::Object(json))?
+                        serde_json::to_string_pretty(&serde_json::Value::Object(json))
+                            .into_diagnostic()?
                     );
                 }
                 OutputFormat::Markdown => {
@@ -948,14 +975,20 @@ async fn main() -> Result<()> {
 
             match cli.format {
                 OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&result)?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&result).into_diagnostic()?
+                    );
                 }
                 OutputFormat::Markdown => {
                     print!("{}", result.to_markdown());
                 }
                 OutputFormat::Sarif => {
                     let sarif = argus_review::sarif::to_sarif(&result);
-                    println!("{}", serde_json::to_string_pretty(&sarif)?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&sarif).into_diagnostic()?
+                    );
                 }
                 OutputFormat::Text => {
                     print!("{result}");
@@ -985,8 +1018,7 @@ async fn main() -> Result<()> {
 
             if apply_patches {
                 let repo_root = repo.as_deref().unwrap_or(std::path::Path::new("."));
-                let patch_result =
-                    argus_review::patch::apply_patches(&result.comments, repo_root)?;
+                let patch_result = argus_review::patch::apply_patches(&result.comments, repo_root)?;
                 eprintln!(
                     "{} patches applied, {} skipped",
                     patch_result.applied.len(),
@@ -1002,7 +1034,7 @@ async fn main() -> Result<()> {
 
             if post_comments {
                 let Some(pr_ref) = pr else {
-                    anyhow::bail!("--post-comments requires --pr");
+                    miette::bail!("--post-comments requires --pr");
                 };
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
                 let github = argus_review::github::GitHubClient::new(None)?;
@@ -1033,9 +1065,9 @@ async fn main() -> Result<()> {
         Command::Init => {
             let path = std::path::Path::new(".argus.toml");
             if path.exists() {
-                anyhow::bail!(".argus.toml already exists");
+                miette::bail!(".argus.toml already exists");
             }
-            std::fs::write(path, DEFAULT_CONFIG)?;
+            std::fs::write(path, DEFAULT_CONFIG).into_diagnostic()?;
             println!("Created .argus.toml with default configuration");
         }
         Command::Doctor => {
