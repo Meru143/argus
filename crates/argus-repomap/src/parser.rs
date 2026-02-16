@@ -209,6 +209,9 @@ fn collect_symbols(
         Language::C => collect_c_symbols(node, source, file, symbols),
         Language::Cpp => collect_cpp_symbols(node, source, file, false, symbols),
         Language::Ruby => collect_ruby_symbols(node, source, file, false, symbols),
+        Language::Php => collect_php_symbols(node, source, file, false, symbols),
+        Language::Kotlin => collect_kotlin_symbols(node, source, file, false, symbols),
+        Language::Swift => collect_swift_symbols(node, source, file, false, symbols),
         Language::Unknown => {}
     }
 }
@@ -827,6 +830,238 @@ fn collect_ruby_symbols(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_ruby_symbols(child, source, file, inside_class, symbols);
+    }
+}
+
+fn collect_php_symbols(
+    node: Node,
+    source: &[u8],
+    file: &PathBuf,
+    inside_class: bool,
+    symbols: &mut Vec<Symbol>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "function_definition" | "method_declaration" => {
+            if let Some(name) = find_child_text(&node, "name", source) {
+                let sig = extract_signature(&node, source);
+                let kind = if inside_class || kind_str == "method_declaration" {
+                    SymbolKind::Method
+                } else {
+                    SymbolKind::Function
+                };
+                symbols.push(Symbol {
+                    name,
+                    kind,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        "class_declaration" | "interface_declaration" | "trait_declaration" => {
+            if let Some(name) = find_child_text(&node, "name", source) {
+                let sig = extract_signature(&node, source);
+                let kind = match kind_str {
+                    "interface_declaration" => SymbolKind::Interface,
+                    "trait_declaration" => SymbolKind::Trait,
+                    _ => SymbolKind::Class,
+                };
+                symbols.push(Symbol {
+                    name,
+                    kind,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_php_symbols(child, source, file, true, symbols);
+            }
+            return;
+        }
+        "namespace_definition" => {
+            if let Some(name) = find_child_text(&node, "namespace_name", source)
+                .or_else(|| find_child_text(&node, "name", source))
+            {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Module,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_php_symbols(child, source, file, inside_class, symbols);
+    }
+}
+
+fn collect_kotlin_symbols(
+    node: Node,
+    source: &[u8],
+    file: &PathBuf,
+    inside_class: bool,
+    symbols: &mut Vec<Symbol>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "function_declaration" => {
+            if let Some(name) = find_child_text(&node, "simple_identifier", source) {
+                let sig = extract_signature(&node, source);
+                let kind = if inside_class {
+                    SymbolKind::Method
+                } else {
+                    SymbolKind::Function
+                };
+                symbols.push(Symbol {
+                    name,
+                    kind,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        "class_declaration" | "object_declaration" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source)
+                .or_else(|| find_child_text(&node, "simple_identifier", source))
+            {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Class,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_kotlin_symbols(child, source, file, true, symbols);
+            }
+            return;
+        }
+        "interface_declaration" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Interface,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_kotlin_symbols(child, source, file, true, symbols);
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_kotlin_symbols(child, source, file, inside_class, symbols);
+    }
+}
+
+fn collect_swift_symbols(
+    node: Node,
+    source: &[u8],
+    file: &PathBuf,
+    inside_class: bool,
+    symbols: &mut Vec<Symbol>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "function_declaration" => {
+            if let Some(name) = find_child_text(&node, "simple_identifier", source) {
+                let sig = extract_signature(&node, source);
+                let kind = if inside_class {
+                    SymbolKind::Method
+                } else {
+                    SymbolKind::Function
+                };
+                symbols.push(Symbol {
+                    name,
+                    kind,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        "class_declaration" | "struct_declaration" | "enum_declaration" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source)
+                .or_else(|| find_child_text(&node, "simple_identifier", source))
+            {
+                let sig = extract_signature(&node, source);
+                let kind = match kind_str {
+                    "struct_declaration" => SymbolKind::Struct,
+                    "enum_declaration" => SymbolKind::Enum,
+                    _ => SymbolKind::Class,
+                };
+                symbols.push(Symbol {
+                    name,
+                    kind,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_swift_symbols(child, source, file, true, symbols);
+            }
+            return;
+        }
+        "protocol_declaration" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source)
+                .or_else(|| find_child_text(&node, "simple_identifier", source))
+            {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Interface,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_swift_symbols(child, source, file, true, symbols);
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_swift_symbols(child, source, file, inside_class, symbols);
     }
 }
 
