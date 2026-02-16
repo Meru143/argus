@@ -4,7 +4,7 @@
 
 If you discover a security vulnerability in Argus, please report it responsibly.
 
-**Email:** meru@meru.page
+**Email:** merupatel2012@gmail.com
 
 Please include:
 - Description of the vulnerability
