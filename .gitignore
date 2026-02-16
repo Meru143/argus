@@ -5,3 +5,4 @@ CLAUDE.md
 docs/plans/
 npm/bin/argus-bin*
 npm/.npmrc
+.argus.toml
