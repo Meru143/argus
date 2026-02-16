@@ -261,9 +261,7 @@ impl ReviewPipeline {
             let group_count = groups.len();
             if is_tty {
                 let file_count: usize = groups.iter().map(|g| g.len()).sum();
-                eprintln!(
-                    "Reviewing... ({file_count} files, {group_count} groups)"
-                );
+                eprintln!("Reviewing... ({file_count} files, {group_count} groups)");
             }
 
             for (i, group) in groups.iter().enumerate() {
@@ -319,10 +317,7 @@ impl ReviewPipeline {
                 } else {
                     "files"
                 };
-                eprintln!(
-                    "Reviewing... ({} {file_label}, 1 group)",
-                    kept_diffs.len(),
-                );
+                eprintln!("Reviewing... ({} {file_label}, 1 group)", kept_diffs.len(),);
             }
 
             let is_cross_file = kept_diffs.len() > 1;
@@ -459,10 +454,7 @@ fn estimate_tokens(text: &str) -> usize {
 /// Files sharing a parent directory are reviewed together so the LLM can
 /// catch cross-file issues. Groups that would exceed the token budget are
 /// split into smaller sub-groups.
-fn group_related_diffs<'a>(
-    diffs: &'a [FileDiff],
-    max_tokens: usize,
-) -> Vec<Vec<&'a FileDiff>> {
+fn group_related_diffs<'a>(diffs: &'a [FileDiff], max_tokens: usize) -> Vec<Vec<&'a FileDiff>> {
     use std::path::PathBuf;
 
     let mut dir_groups: HashMap<PathBuf, Vec<&'a FileDiff>> = HashMap::new();
@@ -1018,9 +1010,7 @@ mod tests {
         // c.rs (85%) and d.rs (50%) should be removed
         assert_eq!(kept.len(), 2);
         assert_eq!(filtered.len(), 2);
-        assert!(filtered
-            .iter()
-            .all(|f| f.reason.contains("confidence")));
+        assert!(filtered.iter().all(|f| f.reason.contains("confidence")));
     }
 
     #[test]
@@ -1283,7 +1273,10 @@ mod tests {
 
     #[test]
     fn group_display_name_single_file() {
-        let diffs = vec![make_file_diff("crates/argus-review/src/pipeline.rs", "+a\n")];
+        let diffs = vec![make_file_diff(
+            "crates/argus-review/src/pipeline.rs",
+            "+a\n",
+        )];
         let refs: Vec<&FileDiff> = diffs.iter().collect();
         assert_eq!(group_display_name(&refs), "pipeline.rs");
     }

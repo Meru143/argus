@@ -7,10 +7,9 @@
 use std::path::PathBuf;
 
 use rmcp::{
-    ErrorData as McpError,
     handler::server::{tool::ToolRouter, wrapper::Parameters},
     model::*,
-    schemars, tool, tool_router,
+    schemars, tool, tool_router, ErrorData as McpError,
 };
 use serde::{Deserialize, Serialize};
 
@@ -260,15 +259,18 @@ impl ArgusServer {
             ))
             })?;
 
-        let code_index = argus_codelens::store::CodeIndex::open(&index_path)
-            .map_err(|e| mcp_err(format!("Failed to open index at {}: {e}", index_path.display())))?;
+        let code_index = argus_codelens::store::CodeIndex::open(&index_path).map_err(|e| {
+            mcp_err(format!(
+                "Failed to open index at {}: {e}",
+                index_path.display()
+            ))
+        })?;
 
         // HybridSearch is Send but not Sync (rusqlite Connection uses RefCell).
         // Move it into a blocking task and use Handle::block_on for the async parts.
         let handle = tokio::runtime::Handle::current();
         let result = tokio::task::spawn_blocking(move || {
-            let search =
-                argus_codelens::search::HybridSearch::new(code_index, embedding_client);
+            let search = argus_codelens::search::HybridSearch::new(code_index, embedding_client);
 
             handle.block_on(async {
                 let stats = search.index().stats().map_err(|e| mcp_err(e.to_string()))?;
@@ -307,8 +309,7 @@ impl ArgusServer {
             })
         })
         .await
-        .map_err(|e| mcp_err(format!("Search task failed: {e}")))?
-        ?;
+        .map_err(|e| mcp_err(format!("Search task failed: {e}")))??;
 
         let json = serde_json::to_string_pretty(&result).map_err(|e| mcp_err(e.to_string()))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))

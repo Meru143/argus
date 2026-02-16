@@ -1,6 +1,11 @@
 [package]
 name = "argus-difflens"
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors = ["Meru Patel <meru143@gmail.com>"]
+description.workspace = true
+
 edition.workspace = true
 
 [dependencies]

@@ -1,5 +1,5 @@
-use std::io::Read;
 use std::io::IsTerminal;
+use std::io::Read;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -239,7 +239,11 @@ impl CheckResult {
     }
 }
 
-fn run_doctor(config: &argus_core::ArgusConfig, format: OutputFormat, use_color: bool) -> Result<()> {
+fn run_doctor(
+    config: &argus_core::ArgusConfig,
+    format: OutputFormat,
+    use_color: bool,
+) -> Result<()> {
     let mut checks: Vec<CheckResult> = Vec::new();
 
     // 1. Git repository
@@ -299,7 +303,10 @@ fn run_doctor(config: &argus_core::ArgusConfig, format: OutputFormat, use_color:
         format!("{llm_provider} (model: {llm_model})"),
     ));
     if config.llm.api_key.is_some() || std::env::var(llm_env_var).is_ok() {
-        checks.push(CheckResult::pass("llm_api_key", format!("{llm_env_var} set")));
+        checks.push(CheckResult::pass(
+            "llm_api_key",
+            format!("{llm_env_var} set"),
+        ));
     } else {
         checks.push(CheckResult::fail(
             "llm_api_key",
@@ -391,7 +398,10 @@ fn run_doctor(config: &argus_core::ArgusConfig, format: OutputFormat, use_color:
                 ));
             }
             Err(_) => {
-                checks.push(CheckResult::info("git_history", "unable to read git history"));
+                checks.push(CheckResult::info(
+                    "git_history",
+                    "unable to read git history",
+                ));
             }
         }
     }
@@ -491,9 +501,7 @@ async fn main() -> Result<()> {
     let use_color = match cli.color {
         ColorChoice::Always => true,
         ColorChoice::Never => false,
-        ColorChoice::Auto => {
-            std::io::stdout().is_terminal() && std::env::var("NO_COLOR").is_err()
-        }
+        ColorChoice::Auto => std::io::stdout().is_terminal() && std::env::var("NO_COLOR").is_err(),
     };
 
     if cli.verbose {
@@ -891,7 +899,11 @@ async fn main() -> Result<()> {
             }
 
             let llm_client = argus_review::llm::LlmClient::new(&config.llm)?;
-            let pipeline = argus_review::pipeline::ReviewPipeline::new(llm_client, review_config, config.rules.clone());
+            let pipeline = argus_review::pipeline::ReviewPipeline::new(
+                llm_client,
+                review_config,
+                config.rules.clone(),
+            );
             let result = pipeline.review(&diffs, repo.as_deref()).await?;
 
             // Verbose output

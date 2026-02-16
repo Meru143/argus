@@ -135,12 +135,8 @@ impl LlmClient {
 
         // Auto-switch default model when provider changes
         let model = match provider {
-            Provider::Anthropic if config.model == "gpt-4o" => {
-                "claude-sonnet-4-5".to_string()
-            }
-            Provider::Gemini
-                if config.model == "gpt-4o" || config.model == "claude-sonnet-4-5" =>
-            {
+            Provider::Anthropic if config.model == "gpt-4o" => "claude-sonnet-4-5".to_string(),
+            Provider::Gemini if config.model == "gpt-4o" || config.model == "claude-sonnet-4-5" => {
                 "gemini-2.0-flash".to_string()
             }
             _ => config.model.clone(),
@@ -190,10 +186,7 @@ impl LlmClient {
             )
         })?;
 
-        let base_url = self
-            .base_url
-            .as_deref()
-            .unwrap_or("https://api.openai.com");
+        let base_url = self.base_url.as_deref().unwrap_or("https://api.openai.com");
         let url = format!("{base_url}/v1/chat/completions");
 
         let body = serde_json::json!({
@@ -346,9 +339,7 @@ impl LlmClient {
             .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
             .and_then(|block| block.get("text"))
             .and_then(|t| t.as_str())
-            .ok_or_else(|| {
-                ArgusError::Llm("No text content in Anthropic response".into())
-            })?;
+            .ok_or_else(|| ArgusError::Llm("No text content in Anthropic response".into()))?;
 
         Ok(text.to_string())
     }
@@ -436,10 +427,9 @@ impl LlmClient {
             ))));
         }
 
-        let response_body: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| ArgusError::Llm(redact(format!("failed to parse Gemini response: {e}"))))?;
+        let response_body: serde_json::Value = response.json().await.map_err(|e| {
+            ArgusError::Llm(redact(format!("failed to parse Gemini response: {e}")))
+        })?;
 
         let text = response_body
             .get("candidates")
@@ -852,7 +842,10 @@ mod tests {
 
         assert_eq!(body["generationConfig"]["temperature"], 0.1);
         assert_eq!(body["generationConfig"]["maxOutputTokens"], 4096);
-        assert_eq!(body["systemInstruction"]["parts"][0]["text"], "You are a reviewer.");
+        assert_eq!(
+            body["systemInstruction"]["parts"][0]["text"],
+            "You are a reviewer."
+        );
         assert_eq!(body["contents"][0]["role"], "user");
         assert_eq!(body["contents"][0]["parts"][0]["text"], "Review this");
     }
