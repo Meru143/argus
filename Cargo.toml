@@ -103,6 +103,7 @@ serde = { workspace = true }
 rusqlite = { workspace = true }
 git2 = { workspace = true }
 indicatif = { workspace = true }
+chrono = { version = "0.4.43", features = ["serde"] }
 
 [dev-dependencies]
 tempfile = "3"

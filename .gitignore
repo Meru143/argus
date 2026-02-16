@@ -8,3 +8,5 @@ npm/.npmrc
 .argus.toml
 TODO.md
 demo.tape
+.argus/
+review_output.txt

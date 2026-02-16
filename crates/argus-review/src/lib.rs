@@ -9,3 +9,4 @@ pub mod patch;
 pub mod pipeline;
 pub mod prompt;
 pub mod sarif;
+pub mod state;
