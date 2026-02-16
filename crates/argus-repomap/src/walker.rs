@@ -46,6 +46,9 @@ pub struct SourceFile {
 /// assert_eq!(Language::from_extension("c"), Language::C);
 /// assert_eq!(Language::from_extension("cpp"), Language::Cpp);
 /// assert_eq!(Language::from_extension("rb"), Language::Ruby);
+/// assert_eq!(Language::from_extension("php"), Language::Php);
+/// assert_eq!(Language::from_extension("kt"), Language::Kotlin);
+/// assert_eq!(Language::from_extension("swift"), Language::Swift);
 /// assert_eq!(Language::from_extension("txt"), Language::Unknown);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,6 +62,9 @@ pub enum Language {
     C,
     Cpp,
     Ruby,
+    Php,
+    Kotlin,
+    Swift,
     Unknown,
 }
 
@@ -75,6 +81,9 @@ impl Language {
             "c" | "h" => Language::C,
             "cpp" | "cc" | "cxx" | "hpp" | "hxx" | "hh" => Language::Cpp,
             "rb" => Language::Ruby,
+            "php" => Language::Php,
+            "kt" | "kts" => Language::Kotlin,
+            "swift" => Language::Swift,
             _ => Language::Unknown,
         }
     }
@@ -93,6 +102,9 @@ impl Language {
             Language::C => Some(tree_sitter_c::LANGUAGE.into()),
             Language::Cpp => Some(tree_sitter_cpp::LANGUAGE.into()),
             Language::Ruby => Some(tree_sitter_ruby::LANGUAGE.into()),
+            Language::Php => Some(tree_sitter_php::LANGUAGE_PHP.into()),
+            Language::Kotlin => Some(tree_sitter_kotlin_ng::LANGUAGE.into()),
+            Language::Swift => Some(tree_sitter_swift::LANGUAGE.into()),
             Language::Unknown => None,
         }
     }
