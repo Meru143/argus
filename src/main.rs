@@ -18,7 +18,7 @@ use argus_core::{OutputFormat, Severity};
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 
     /// Path to configuration file (default: .argus.toml)
     #[arg(long, global = true)]
@@ -171,6 +171,47 @@ enum ColorChoice {
     Always,
     /// Never use colors
     Never,
+}
+
+fn print_welcome(use_color: bool) {
+    let version = env!("CARGO_PKG_VERSION");
+
+    if use_color {
+        // Bold/bright header
+        println!("\x1b[1m\x1b[33m⚡\x1b[0m \x1b[1margus\x1b[0m v{version} — AI code review that doesn't grade its own homework\n");
+
+        println!("Quick start:");
+        println!("  \x1b[36margus init\x1b[0m                    Create a .argus.toml config file");
+        println!("  \x1b[36margus review --repo .\x1b[0m         Review your latest changes with AI");
+        println!("  \x1b[36margus map --path .\x1b[0m            Generate a ranked codebase map\n");
+
+        println!("All commands:");
+        println!("  \x1b[32mreview\x1b[0m    AI-powered code review (stdin, file, or GitHub PR)");
+        println!("  \x1b[32mmap\x1b[0m       Ranked codebase structure overview");
+        println!("  \x1b[32msearch\x1b[0m    Semantic + keyword hybrid search");
+        println!("  \x1b[32mhistory\x1b[0m   Hotspot detection, temporal coupling, bus factor");
+        println!("  \x1b[32mdoctor\x1b[0m    Check your setup and environment");
+        println!("  \x1b[32mmcp\x1b[0m       Start MCP server for IDE integration");
+        println!("  \x1b[32minit\x1b[0m      Create default configuration\n");
+    } else {
+        println!("argus v{version} — AI code review that doesn't grade its own homework\n");
+
+        println!("Quick start:");
+        println!("  argus init                    Create a .argus.toml config file");
+        println!("  argus review --repo .         Review your latest changes with AI");
+        println!("  argus map --path .            Generate a ranked codebase map\n");
+
+        println!("All commands:");
+        println!("  review    AI-powered code review (stdin, file, or GitHub PR)");
+        println!("  map       Ranked codebase structure overview");
+        println!("  search    Semantic + keyword hybrid search");
+        println!("  history   Hotspot detection, temporal coupling, bus factor");
+        println!("  doctor    Check your setup and environment");
+        println!("  mcp       Start MCP server for IDE integration");
+        println!("  init      Create default configuration\n");
+    }
+
+    println!("Run 'argus <command> --help' for details.");
 }
 
 fn read_diff_input(file: &Option<PathBuf>) -> Result<String> {
@@ -543,15 +584,19 @@ async fn main() -> Result<()> {
     }
 
     match cli.command {
-        Command::Map {
+        None => {
+            print_welcome(use_color);
+            return Ok(());
+        }
+        Some(Command::Map {
             ref path,
             max_tokens,
             ref focus,
-        } => {
+        }) => {
             let output = argus_repomap::generate_map(path, max_tokens, focus, cli.format)?;
             print!("{output}");
         }
-        Command::Diff { ref file } => {
+        Some(Command::Diff { ref file }) => {
             if cli.format == OutputFormat::Sarif {
                 miette::bail!("SARIF output is only supported for the review subcommand.");
             }
@@ -575,13 +620,13 @@ async fn main() -> Result<()> {
                 OutputFormat::Sarif => unreachable!(),
             }
         }
-        Command::Search {
+        Some(Command::Search {
             ref query,
             ref path,
             limit,
             index,
             reindex,
-        } => {
+        }) => {
             if cli.format == OutputFormat::Sarif {
                 miette::bail!("SARIF output is only supported for the review subcommand.");
             }
@@ -671,13 +716,13 @@ async fn main() -> Result<()> {
                 miette::bail!("provide a search query, or use --index / --reindex");
             }
         }
-        Command::History {
+        Some(Command::History {
             ref path,
             ref analysis,
             since,
             limit,
             min_coupling,
-        } => {
+        }) => {
             if cli.format == OutputFormat::Sarif {
                 miette::bail!("SARIF output is only supported for the review subcommand.");
             }
@@ -889,7 +934,7 @@ async fn main() -> Result<()> {
                 OutputFormat::Sarif => unreachable!(),
             }
         }
-        Command::Review {
+        Some(Command::Review {
             ref pr,
             ref file,
             post_comments,
@@ -899,7 +944,7 @@ async fn main() -> Result<()> {
             fail_on,
             show_filtered,
             apply_patches,
-        } => {
+        }) => {
             let diff_input = if let Some(pr_ref) = pr {
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
                 let github = argus_review::github::GitHubClient::new(None)?;
@@ -1059,10 +1104,10 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Command::Mcp { ref path } => {
+        Some(Command::Mcp { ref path }) => {
             argus_mcp::server::run_server(path.clone()).await?;
         }
-        Command::Init => {
+        Some(Command::Init) => {
             let path = std::path::Path::new(".argus.toml");
             if path.exists() {
                 miette::bail!(".argus.toml already exists");
@@ -1070,10 +1115,10 @@ async fn main() -> Result<()> {
             std::fs::write(path, DEFAULT_CONFIG).into_diagnostic()?;
             println!("Created .argus.toml with default configuration");
         }
-        Command::Doctor => {
+        Some(Command::Doctor) => {
             run_doctor(&config, cli.format, use_color)?;
         }
-        Command::Completions { shell } => {
+        Some(Command::Completions { shell }) => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "argus", &mut std::io::stdout());
         }
