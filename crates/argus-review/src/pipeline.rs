@@ -36,6 +36,7 @@ use crate::prompt;
 ///         model_used: "gpt-4o".into(),
 ///         llm_calls: 0,
 ///         file_groups: vec![],
+///         hotspot_files: 0,
 ///     },
 /// };
 /// assert!(result.comments.is_empty());
@@ -107,6 +108,7 @@ pub struct FilteredComment {
 ///     model_used: "gpt-4o".into(),
 ///     llm_calls: 2,
 ///     file_groups: vec![],
+///     hotspot_files: 0,
 /// };
 /// assert_eq!(stats.files_reviewed, 3);
 /// ```
@@ -137,6 +139,8 @@ pub struct ReviewStats {
     /// Cross-file groups used during review (for verbose output).
     #[serde(skip)]
     pub file_groups: Vec<Vec<String>>,
+    /// Number of files identified as hotspots (score ≥ 0.7).
+    pub hotspot_files: usize,
 }
 
 /// Review orchestrator that drives the full review pipeline.
@@ -201,6 +205,7 @@ impl ReviewPipeline {
                     model_used: self.llm.model().to_string(),
                     llm_calls: 0,
                     file_groups: vec![],
+                    hotspot_files: 0,
                 },
             });
         }
@@ -229,12 +234,48 @@ impl ReviewPipeline {
             None
         };
 
-        // Build git history context if repo is available
-        let history_context = if let Some(root) = repo_path {
-            build_history_context(&kept_diffs, root)
+        // Build git history insights if repo is available
+        let history_insights = if let Some(root) = repo_path {
+            build_history_insights(&kept_diffs, root)
         } else {
             None
         };
+
+        let history_context = history_insights
+            .as_ref()
+            .filter(|h| !h.context.is_empty())
+            .map(|h| h.context.as_str());
+        let hotspot_scores = history_insights
+            .as_ref()
+            .map(|h| &h.hotspot_scores)
+            .cloned()
+            .unwrap_or_default();
+
+        // Sort diffs so hotspot files come first (higher score = reviewed first)
+        let mut kept_diffs = kept_diffs;
+        kept_diffs.sort_by(|a, b| {
+            let score_a = hotspot_scores
+                .get(&a.new_path.to_string_lossy().to_string())
+                .copied()
+                .unwrap_or(0.0);
+            let score_b = hotspot_scores
+                .get(&b.new_path.to_string_lossy().to_string())
+                .copied()
+                .unwrap_or(0.0);
+            score_b
+                .partial_cmp(&score_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Count hotspot files for stats
+        let hotspot_file_count: usize = kept_diffs
+            .iter()
+            .filter(|d| {
+                hotspot_scores
+                    .get(&d.new_path.to_string_lossy().to_string())
+                    .is_some_and(|&s| s >= 0.7)
+            })
+            .count();
 
         // 2. Decide whether to split or send as one call
         let diff_text = diffs_to_text(&kept_diffs);
@@ -298,12 +339,16 @@ impl ReviewPipeline {
 
                 let group_diff_text = diffs_to_text(group);
                 let is_cross_file = group.len() > 1;
+
+                // Build per-file hotspot context for this group
+                let file_ctx = build_hotspot_file_context(group, &hotspot_scores);
+
                 let user = prompt::build_review_prompt(
                     &group_diff_text,
                     repo_map.as_deref(),
                     related_code.as_deref(),
-                    history_context.as_deref(),
-                    None,
+                    history_context,
+                    file_ctx.as_deref(),
                     is_cross_file,
                 );
 
@@ -362,12 +407,16 @@ impl ReviewPipeline {
             };
 
             let is_cross_file = kept_diffs.len() > 1;
+
+            // Build per-file hotspot context
+            let file_ctx = build_hotspot_file_context(&kept_diffs, &hotspot_scores);
+
             let user = prompt::build_review_prompt(
                 &diff_text,
                 repo_map.as_deref(),
                 related_code.as_deref(),
-                history_context.as_deref(),
-                None,
+                history_context,
+                file_ctx.as_deref(),
                 is_cross_file,
             );
 
@@ -492,6 +541,7 @@ impl ReviewPipeline {
                 model_used: self.llm.model().to_string(),
                 llm_calls,
                 file_groups,
+                hotspot_files: hotspot_file_count,
             },
         })
     }
@@ -850,11 +900,58 @@ fn build_related_code_context(diffs: &[FileDiff], index_path: &std::path::Path) 
     }
 }
 
-/// Build git history context for files in the diff.
+/// Build per-file hotspot context string for the LLM prompt.
+///
+/// When files in the diff are known hotspots (score ≥ 0.7), generates
+/// a context block instructing the LLM to review them more carefully.
+fn build_hotspot_file_context<D: std::borrow::Borrow<FileDiff>>(
+    diffs: &[D],
+    hotspot_scores: &HashMap<String, f64>,
+) -> Option<String> {
+    let mut lines = Vec::new();
+
+    for d in diffs {
+        let path = d.borrow().new_path.to_string_lossy().to_string();
+        if let Some(&score) = hotspot_scores.get(&path) {
+            if score >= 0.7 {
+                lines.push(format!(
+                    "⚠️  {} is a HIGH-CHURN HOTSPOT (score: {:.2}). \
+                     This file changes frequently and is a common source of bugs. \
+                     Review changes here with EXTRA SCRUTINY — even minor issues matter.",
+                    path, score
+                ));
+            } else if score >= 0.4 {
+                lines.push(format!(
+                    "📊 {} has moderate churn (score: {:.2}). Review with care.",
+                    path, score
+                ));
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(format!("## Hotspot Analysis\n\n{}\n", lines.join("\n")))
+    }
+}
+
+/// Structured insights from git history analysis.
+///
+/// Contains both the text context for LLM prompts and the hotspot scores
+/// for programmatic prioritization.
+struct HistoryInsights {
+    /// Human-readable context for the LLM prompt.
+    context: String,
+    /// Map of file path → hotspot score (0.0–1.0).
+    hotspot_scores: HashMap<String, f64>,
+}
+
+/// Build git history insights for files in the diff.
 ///
 /// Mines recent history and identifies hotspots, coupling, and knowledge silos
-/// for the changed files.
-fn build_history_context(diffs: &[FileDiff], repo_path: &Path) -> Option<String> {
+/// for the changed files. Returns both text context and structured hotspot data.
+fn build_history_insights(diffs: &[FileDiff], repo_path: &Path) -> Option<HistoryInsights> {
     let options = argus_gitpulse::mining::MiningOptions::default();
     let commits = match argus_gitpulse::mining::mine_history(repo_path, &options) {
         Ok(c) if !c.is_empty() => c,
@@ -872,10 +969,12 @@ fn build_history_context(diffs: &[FileDiff], repo_path: &Path) -> Option<String>
         .collect();
 
     let mut lines = Vec::new();
+    let mut hotspot_scores = HashMap::new();
 
     // Hotspot info for changed files
     for h in &hotspots {
         if changed_files.contains(&h.path) {
+            hotspot_scores.insert(h.path.clone(), h.score);
             lines.push(format!(
                 "- {}: {} revisions in {} months, {} authors, {}",
                 h.path,
@@ -918,11 +1017,14 @@ fn build_history_context(diffs: &[FileDiff], repo_path: &Path) -> Option<String>
         }
     }
 
-    if lines.is_empty() {
+    if lines.is_empty() && hotspot_scores.is_empty() {
         return None;
     }
 
-    Some(lines.join("\n"))
+    Some(HistoryInsights {
+        context: lines.join("\n"),
+        hotspot_scores,
+    })
 }
 
 impl fmt::Display for ReviewResult {
@@ -942,6 +1044,19 @@ impl fmt::Display for ReviewResult {
             self.stats.comments_reflected_out,
             self.stats.llm_calls,
         )?;
+
+        if self.stats.hotspot_files > 0 {
+            writeln!(
+                f,
+                "🔥 {} hotspot file{} detected — reviewed with extra scrutiny\n",
+                self.stats.hotspot_files,
+                if self.stats.hotspot_files == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+            )?;
+        }
 
         if let Some(summary) = &self.summary {
             writeln!(f, "Summary: {summary}\n")?;
@@ -1024,6 +1139,7 @@ impl ReviewResult {
     ///         model_used: "gpt-4o".into(),
     ///         llm_calls: 0,
     ///         file_groups: vec![],
+    ///         hotspot_files: 0,
     ///     },
     /// };
     /// let md = result.to_markdown();
@@ -1291,6 +1407,7 @@ mod tests {
                 model_used: "test".into(),
                 llm_calls: 1,
                 file_groups: vec![],
+                hotspot_files: 0,
             },
         };
         let text = format!("{result}");
@@ -1519,6 +1636,7 @@ mod tests {
                 model_used: "test".into(),
                 llm_calls: 2,
                 file_groups: vec![],
+                hotspot_files: 0,
             },
         };
         let text = format!("{result}");
@@ -1543,6 +1661,7 @@ mod tests {
                 model_used: "test".into(),
                 llm_calls: 0,
                 file_groups: vec![],
+                hotspot_files: 0,
             },
         };
         let text = format!("{result}");
@@ -1576,6 +1695,7 @@ mod tests {
                 model_used: "test".into(),
                 llm_calls: 2,
                 file_groups: vec![],
+                hotspot_files: 0,
             },
         };
         let md = result.to_markdown();
@@ -1609,6 +1729,7 @@ mod tests {
                 model_used: "test".into(),
                 llm_calls: 1,
                 file_groups: vec![],
+                hotspot_files: 0,
             },
         };
         let text = format!("{result}");
@@ -1644,6 +1765,7 @@ mod tests {
                 model_used: "test".into(),
                 llm_calls: 1,
                 file_groups: vec![],
+                hotspot_files: 0,
             },
         };
         let md = result.to_markdown();
