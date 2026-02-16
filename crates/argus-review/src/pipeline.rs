@@ -70,6 +70,7 @@ pub struct ReviewResult {
 ///         message: "minor note".into(),
 ///         confidence: 95.0,
 ///         suggestion: None,
+///         patch: None,
 ///         rule: None,
 ///     },
 ///     reason: "below confidence threshold".into(),
@@ -850,6 +851,12 @@ impl fmt::Display for ReviewResult {
                 if let Some(s) = &c.suggestion {
                     writeln!(f, "  Suggestion: {s}")?;
                 }
+                if let Some(patch) = &c.patch {
+                    writeln!(f, "  Patch:")?;
+                    for line in patch.lines() {
+                        writeln!(f, "    {line}")?;
+                    }
+                }
                 writeln!(f)?;
             }
         }
@@ -940,6 +947,9 @@ impl ReviewResult {
                 if let Some(s) = &c.suggestion {
                     out.push_str(&format!("> **Suggestion:** {s}\n\n"));
                 }
+                if let Some(patch) = &c.patch {
+                    out.push_str(&format!("```\n{patch}\n```\n\n"));
+                }
             }
         }
         out
@@ -960,6 +970,7 @@ mod tests {
                 message: "info comment".into(),
                 confidence: 95.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
             ReviewComment {
@@ -969,6 +980,7 @@ mod tests {
                 message: "real bug".into(),
                 confidence: 98.0,
                 suggestion: Some("fix it".into()),
+                patch: None,
                 rule: None,
             },
             ReviewComment {
@@ -978,6 +990,7 @@ mod tests {
                 message: "potential issue".into(),
                 confidence: 85.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
             ReviewComment {
@@ -987,6 +1000,7 @@ mod tests {
                 message: "low confidence bug".into(),
                 confidence: 50.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
         ]
@@ -1074,6 +1088,7 @@ mod tests {
                 message: "null deref".into(),
                 confidence: 85.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
             ReviewComment {
@@ -1083,6 +1098,7 @@ mod tests {
                 message: "null deref".into(),
                 confidence: 95.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
             ReviewComment {
@@ -1092,6 +1108,7 @@ mod tests {
                 message: "different issue".into(),
                 confidence: 90.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
         ];
@@ -1122,6 +1139,7 @@ mod tests {
                 message: "test bug".into(),
                 confidence: 99.0,
                 suggestion: Some("fix it".into()),
+                patch: None,
                 rule: None,
             }],
             filtered_comments: vec![],
@@ -1244,6 +1262,7 @@ mod tests {
                 message: "Using .unwrap() violates no-unwrap rule".into(),
                 confidence: 95.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
             ReviewComment {
@@ -1253,6 +1272,7 @@ mod tests {
                 message: "Null pointer dereference".into(),
                 confidence: 90.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
         ];
@@ -1343,6 +1363,7 @@ mod tests {
                 message: "test bug".into(),
                 confidence: 99.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             }],
             filtered_comments: vec![],
@@ -1397,6 +1418,7 @@ mod tests {
                 message: "test bug".into(),
                 confidence: 99.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             }],
             filtered_comments: vec![],
@@ -1416,5 +1438,71 @@ mod tests {
         };
         let md = result.to_markdown();
         assert!(md.contains("> Medium risk due to missing error handling."));
+    }
+
+    #[test]
+    fn display_shows_patch_when_present() {
+        let result = ReviewResult {
+            comments: vec![ReviewComment {
+                file_path: PathBuf::from("test.rs"),
+                line: 5,
+                severity: Severity::Bug,
+                message: "test bug".into(),
+                confidence: 99.0,
+                suggestion: Some("fix it".into()),
+                patch: Some("let x = safe_call();\nuse(x);".into()),
+                rule: None,
+            }],
+            filtered_comments: vec![],
+            summary: None,
+            stats: ReviewStats {
+                files_reviewed: 1,
+                files_skipped: 0,
+                total_hunks: 1,
+                comments_generated: 1,
+                comments_filtered: 0,
+                comments_deduplicated: 0,
+                skipped_files: vec![],
+                model_used: "test".into(),
+                llm_calls: 1,
+                file_groups: vec![],
+            },
+        };
+        let text = format!("{result}");
+        assert!(text.contains("Patch:"));
+        assert!(text.contains("    let x = safe_call();"));
+        assert!(text.contains("    use(x);"));
+    }
+
+    #[test]
+    fn markdown_shows_patch_code_block() {
+        let result = ReviewResult {
+            comments: vec![ReviewComment {
+                file_path: PathBuf::from("test.rs"),
+                line: 5,
+                severity: Severity::Bug,
+                message: "test bug".into(),
+                confidence: 99.0,
+                suggestion: None,
+                patch: Some("let x = safe_call();".into()),
+                rule: None,
+            }],
+            filtered_comments: vec![],
+            summary: None,
+            stats: ReviewStats {
+                files_reviewed: 1,
+                files_skipped: 0,
+                total_hunks: 1,
+                comments_generated: 1,
+                comments_filtered: 0,
+                comments_deduplicated: 0,
+                skipped_files: vec![],
+                model_used: "test".into(),
+                llm_calls: 1,
+                file_groups: vec![],
+            },
+        };
+        let md = result.to_markdown();
+        assert!(md.contains("```\nlet x = safe_call();\n```"));
     }
 }

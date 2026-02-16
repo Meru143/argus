@@ -264,6 +264,7 @@ impl Severity {
 ///     message: "Possible null dereference".into(),
 ///     confidence: 95.0,
 ///     suggestion: Some("Add a None check".into()),
+///     patch: None,
 ///     rule: None,
 /// };
 /// assert_eq!(comment.severity, Severity::Bug);
@@ -283,6 +284,9 @@ pub struct ReviewComment {
     pub confidence: f64,
     /// Optional fix suggestion.
     pub suggestion: Option<String>,
+    /// Optional code snippet showing the corrected code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patch: Option<String>,
     /// Custom rule name that matched this comment, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
@@ -503,6 +507,7 @@ mod tests {
             message: "test".into(),
             confidence: 99.0,
             suggestion: None,
+            patch: None,
             rule: None,
         };
         let json = serde_json::to_value(&comment).unwrap();

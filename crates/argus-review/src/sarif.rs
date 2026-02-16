@@ -40,7 +40,7 @@ pub fn to_sarif(result: &ReviewResult) -> serde_json::Value {
         .comments
         .iter()
         .map(|c| {
-            serde_json::json!({
+            let mut entry = serde_json::json!({
                 "ruleId": format!("argus/{}", severity_to_rule_id(c.severity)),
                 "level": severity_to_sarif_level(c.severity),
                 "message": { "text": &c.message },
@@ -54,7 +54,26 @@ pub fn to_sarif(result: &ReviewResult) -> serde_json::Value {
                         }
                     }
                 }]
-            })
+            });
+            if let Some(patch) = &c.patch {
+                entry["fixes"] = serde_json::json!([{
+                    "description": { "text": "Suggested fix" },
+                    "artifactChanges": [{
+                        "artifactLocation": {
+                            "uri": c.file_path.display().to_string()
+                        },
+                        "replacements": [{
+                            "deletedRegion": {
+                                "startLine": c.line
+                            },
+                            "insertedContent": {
+                                "text": patch
+                            }
+                        }]
+                    }]
+                }]);
+            }
+            entry
         })
         .collect();
 
@@ -203,6 +222,7 @@ mod tests {
                 message: "Null dereference".into(),
                 confidence: 95.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
             ReviewComment {
@@ -212,6 +232,7 @@ mod tests {
                 message: "SQL injection risk".into(),
                 confidence: 88.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
         ];
@@ -243,6 +264,7 @@ mod tests {
                 message: "bug 1".into(),
                 confidence: 90.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
             ReviewComment {
@@ -252,6 +274,7 @@ mod tests {
                 message: "bug 2".into(),
                 confidence: 90.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
         ];
