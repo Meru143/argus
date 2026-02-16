@@ -10,3 +10,6 @@ TODO.md
 demo.tape
 .argus/
 review_output.txt
+
+# Private sprint logs
+SPRINT-*.md
