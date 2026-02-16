@@ -51,13 +51,14 @@ enum Provider {
     OpenAi,
     Anthropic,
     Gemini,
+    Ollama,
 }
 
 /// Multi-provider LLM chat client.
 ///
 /// Supports OpenAI-compatible (`/v1/chat/completions`), Anthropic
-/// (`/v1/messages`), and Gemini (`generateContent`) endpoints. The
-/// provider is determined by `LlmConfig.provider`.
+/// (`/v1/messages`), Gemini (`generateContent`), and Ollama (`/api/chat`) endpoints.
+/// The provider is determined by `LlmConfig.provider`.
 ///
 /// # Examples
 ///
@@ -115,9 +116,10 @@ impl LlmClient {
             "openai" => Provider::OpenAi,
             "anthropic" => Provider::Anthropic,
             "gemini" => Provider::Gemini,
+            "ollama" => Provider::Ollama,
             other => {
                 return Err(ArgusError::Llm(format!(
-                    "Unknown LLM provider: '{other}'. Supported: openai, anthropic, gemini"
+                    "Unknown LLM provider: '{other}'. Supported: openai, anthropic, gemini, ollama"
                 )));
             }
         };
@@ -126,6 +128,7 @@ impl LlmClient {
             Provider::OpenAi => "OPENAI_API_KEY",
             Provider::Anthropic => "ANTHROPIC_API_KEY",
             Provider::Gemini => "GEMINI_API_KEY",
+            Provider::Ollama => "OLLAMA_API_KEY",
         };
 
         let api_key = config
@@ -138,6 +141,9 @@ impl LlmClient {
             Provider::Anthropic if config.model == "gpt-4o" => "claude-sonnet-4-5".to_string(),
             Provider::Gemini if config.model == "gpt-4o" || config.model == "claude-sonnet-4-5" => {
                 "gemini-2.0-flash".to_string()
+            }
+            Provider::Ollama if config.model == "gpt-4o" || config.model == "claude-sonnet-4-5" => {
+                "llama3".to_string()
             }
             _ => config.model.clone(),
         };
@@ -176,6 +182,7 @@ impl LlmClient {
             Provider::OpenAi => self.chat_openai(messages).await,
             Provider::Anthropic => self.chat_anthropic(messages).await,
             Provider::Gemini => self.chat_gemini(messages).await,
+            Provider::Ollama => self.chat_ollama(messages).await,
         }
     }
 
@@ -446,6 +453,54 @@ impl LlmClient {
             })?;
 
         Ok(text.to_string())
+    }
+
+    async fn chat_ollama(&self, messages: Vec<ChatMessage>) -> Result<String, ArgusError> {
+        let base_url = self.base_url.as_deref().unwrap_or("http://localhost:11434");
+        let url = format!("{base_url}/api/chat");
+
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            "stream": false,
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": 4096,
+            }
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ArgusError::Llm(format!("Ollama request failed: {e}")))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body_text = response.text().await.unwrap_or_default();
+            return Err(ArgusError::Llm(format!(
+                "Ollama API error {status}: {body_text}"
+            )));
+        }
+
+        let response_body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| ArgusError::Llm(format!("failed to parse Ollama response: {e}")))?;
+
+        let content = response_body
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .ok_or_else(|| {
+                ArgusError::Llm(format!(
+                    "unexpected Ollama response structure: {response_body}"
+                ))
+            })?;
+
+        Ok(content.to_string())
     }
 }
 
@@ -922,5 +977,70 @@ mod tests {
 
         assert_eq!(contents[0]["role"], "user");
         assert_eq!(contents[1]["role"], "model");
+    }
+
+    #[test]
+    fn ollama_provider_auto_switches_default_model() {
+        let config = LlmConfig {
+            provider: "ollama".into(),
+            ..LlmConfig::default() // model defaults to gpt-4o
+        };
+        let client = LlmClient::new(&config).unwrap();
+        assert_eq!(client.model(), "llama3");
+    }
+
+    #[test]
+    fn ollama_provider_preserves_custom_model() {
+        let config = LlmConfig {
+            provider: "ollama".into(),
+            model: "mistral".into(),
+            ..LlmConfig::default()
+        };
+        let client = LlmClient::new(&config).unwrap();
+        assert_eq!(client.model(), "mistral");
+    }
+
+    #[test]
+    fn ollama_request_body_format() {
+        let messages = vec![ChatMessage {
+            role: Role::User,
+            content: "Review this".into(),
+        }];
+
+        let body = serde_json::json!({
+            "model": "llama3",
+            "messages": messages,
+            "stream": false,
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": 4096,
+            }
+        });
+
+        assert_eq!(body["model"], "llama3");
+        assert_eq!(body["stream"], false);
+        assert_eq!(body["options"]["temperature"], 0.1);
+        assert_eq!(body["messages"][0]["role"], "user");
+    }
+
+    #[test]
+    fn ollama_response_parsing() {
+        let response = serde_json::json!({
+            "model": "llama3",
+            "created_at": "2023-08-04T08:52:19.385406455-07:00",
+            "message": {
+                "role": "assistant",
+                "content": "{\"comments\":[]}",
+            },
+            "done": true,
+        });
+
+        let content = response
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap();
+
+        assert_eq!(content, "{\"comments\":[]}");
     }
 }
