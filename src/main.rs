@@ -2,6 +2,8 @@ use std::io::IsTerminal;
 use std::io::Read;
 use std::path::PathBuf;
 
+use argus_review::state::ReviewState;
+use chrono::Utc;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use miette::{Context, IntoDiagnostic, Result};
 
@@ -1077,8 +1079,8 @@ async fn main() -> Result<()> {
             show_filtered,
             apply_patches,
             no_self_reflection,
-            incremental: _,
-            base_sha: _,
+            incremental,
+            ref base_sha,
         }) => {
             // Hint: suggest `argus init` when no config file exists
             if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
@@ -1088,22 +1090,71 @@ async fn main() -> Result<()> {
                 ));
             }
 
-            let diff_input = if let Some(pr_ref) = pr {
+            let repo_root = repo.clone().unwrap_or_else(|| PathBuf::from("."));
+
+            // Determine diff input and current HEAD (for state saving)
+            let (diff_input, current_head_sha) = if let Some(pr_ref) = pr {
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
                 let github = argus_review::github::GitHubClient::new(None)?;
-                github.get_pr_diff(&owner, &repo, pr_number).await?
+                (github.get_pr_diff(&owner, &repo, pr_number).await?, None)
+            } else if let Some(file_path) = file {
+                (read_diff_input(&Some(file_path.clone()))?, None)
+            } else if incremental || base_sha.is_some() {
+                // Incremental review logic
+                let head_output = std::process::Command::new("git")
+                    .args(["-C", &repo_root.to_string_lossy(), "rev-parse", "HEAD"])
+                    .output()
+                    .into_diagnostic()
+                    .wrap_err("Failed to run git rev-parse HEAD")?;
+
+                if !head_output.status.success() {
+                    let stderr = String::from_utf8_lossy(&head_output.stderr);
+                    miette::bail!("git rev-parse failed: {}", stderr.trim());
+                }
+
+                let current_head = String::from_utf8_lossy(&head_output.stdout)
+                    .trim()
+                    .to_string();
+
+                let diff_base = if let Some(sha) = base_sha {
+                    sha.clone()
+                } else {
+                    let state = ReviewState::load(&repo_root)?;
+                    if let Some(s) = state {
+                        s.last_reviewed_sha
+                    } else {
+                        eprintln!(
+                            "No previous review state found. Reviewing uncommitted changes (HEAD)."
+                        );
+                        "HEAD".to_string()
+                    }
+                };
+
+                let diff_output = std::process::Command::new("git")
+                    .args(["-C", &repo_root.to_string_lossy(), "diff", &diff_base])
+                    .output()
+                    .into_diagnostic()
+                    .wrap_err(format!("Failed to run git diff {}", diff_base))?;
+
+                if !diff_output.status.success() {
+                    let stderr = String::from_utf8_lossy(&diff_output.stderr);
+                    miette::bail!("git diff failed: {}", stderr.trim());
+                }
+
+                (
+                    String::from_utf8_lossy(&diff_output.stdout).to_string(),
+                    Some(current_head),
+                )
             } else {
-                read_diff_input(file)?
+                (read_diff_input(&None)?, None)
             };
 
-            // Hint: empty diff input from stdin
+            // Hint: empty diff input from stdin/git
             if diff_input.trim().is_empty() && pr.is_none() {
-                miette::bail!(
-                    miette::miette!(
-                        help = "Pipe a diff to argus, e.g.: git diff | argus review --repo .\n       Or use --file <path> or --pr owner/repo#123",
-                        "Empty diff input"
-                    )
-                );
+                miette::bail!(miette::miette!(
+                    help = "Pipe a diff to argus, e.g.: git diff | argus review --repo .\n       Or use --file <path>, --pr owner/repo#123, or --incremental",
+                    "Empty diff input"
+                ));
             }
 
             let diffs = argus_difflens::parser::parse_unified_diff(&diff_input)?;
@@ -1263,6 +1314,16 @@ async fn main() -> Result<()> {
                     .post_review(&owner, &repo, pr_number, &result.comments, &summary)
                     .await?;
                 eprintln!("Posted {} comments to {pr_ref}", result.comments.len());
+            }
+
+            if let Some(head) = current_head_sha {
+                let state = ReviewState {
+                    last_reviewed_sha: head,
+                    timestamp: Utc::now(),
+                };
+                if let Err(e) = state.save(&repo_root) {
+                    eprintln!("warning: failed to save review state: {e}");
+                }
             }
 
             if let Some(threshold) = fail_on {
