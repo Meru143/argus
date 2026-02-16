@@ -123,6 +123,15 @@ pub fn chunk_file(
         Language::Ruby => {
             collect_ruby_chunks(tree.root_node(), source, path, lang_str, None, &mut chunks)
         }
+        Language::Php => {
+            collect_php_chunks(tree.root_node(), source, path, lang_str, None, &mut chunks)
+        }
+        Language::Kotlin => {
+            collect_kotlin_chunks(tree.root_node(), source, path, lang_str, None, &mut chunks)
+        }
+        Language::Swift => {
+            collect_swift_chunks(tree.root_node(), source, path, lang_str, None, &mut chunks)
+        }
         Language::Unknown => {}
     }
 
@@ -167,6 +176,9 @@ fn language_str(lang: Language) -> &'static str {
         Language::C => "c",
         Language::Cpp => "cpp",
         Language::Ruby => "ruby",
+        Language::Php => "php",
+        Language::Kotlin => "kotlin",
+        Language::Swift => "swift",
         Language::Unknown => "unknown",
     }
 }
@@ -734,6 +746,221 @@ fn collect_ruby_chunks(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_ruby_chunks(child, source, file_path, language, scope, chunks);
+    }
+}
+
+fn collect_php_chunks(
+    node: Node,
+    source: &[u8],
+    file_path: &Path,
+    language: &str,
+    scope: Option<&str>,
+    chunks: &mut Vec<CodeChunk>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "function_definition" | "method_declaration" => {
+            if let Some(name) = find_child_text(&node, "name", source) {
+                let entity_type = if scope.is_some() || kind_str == "method_declaration" {
+                    "method"
+                } else {
+                    "function"
+                };
+                chunks.push(make_chunk(
+                    file_path,
+                    &node,
+                    source,
+                    &name,
+                    entity_type,
+                    language,
+                    scope,
+                ));
+            }
+        }
+        "class_declaration" | "interface_declaration" | "trait_declaration" => {
+            let name = find_child_text(&node, "name", source);
+            if let Some(name) = &name {
+                let entity_type = match kind_str {
+                    "interface_declaration" => "interface",
+                    "trait_declaration" => "trait",
+                    _ => "class",
+                };
+                chunks.push(make_chunk(
+                    file_path,
+                    &node,
+                    source,
+                    name,
+                    entity_type,
+                    language,
+                    scope,
+                ));
+            }
+            let scope_name = name.as_deref();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_php_chunks(child, source, file_path, language, scope_name, chunks);
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_php_chunks(child, source, file_path, language, scope, chunks);
+    }
+}
+
+fn collect_kotlin_chunks(
+    node: Node,
+    source: &[u8],
+    file_path: &Path,
+    language: &str,
+    scope: Option<&str>,
+    chunks: &mut Vec<CodeChunk>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "function_declaration" => {
+            if let Some(name) = find_child_text(&node, "simple_identifier", source) {
+                let entity_type = if scope.is_some() {
+                    "method"
+                } else {
+                    "function"
+                };
+                chunks.push(make_chunk(
+                    file_path,
+                    &node,
+                    source,
+                    &name,
+                    entity_type,
+                    language,
+                    scope,
+                ));
+            }
+        }
+        "class_declaration" | "object_declaration" => {
+            let name = find_child_text(&node, "type_identifier", source)
+                .or_else(|| find_child_text(&node, "simple_identifier", source));
+            if let Some(name) = &name {
+                chunks.push(make_chunk(
+                    file_path, &node, source, name, "class", language, scope,
+                ));
+            }
+            let scope_name = name.as_deref();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_kotlin_chunks(child, source, file_path, language, scope_name, chunks);
+            }
+            return;
+        }
+        "interface_declaration" => {
+            let name = find_child_text(&node, "type_identifier", source);
+            if let Some(name) = &name {
+                chunks.push(make_chunk(
+                    file_path,
+                    &node,
+                    source,
+                    name,
+                    "interface",
+                    language,
+                    scope,
+                ));
+            }
+            let scope_name = name.as_deref();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_kotlin_chunks(child, source, file_path, language, scope_name, chunks);
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_kotlin_chunks(child, source, file_path, language, scope, chunks);
+    }
+}
+
+fn collect_swift_chunks(
+    node: Node,
+    source: &[u8],
+    file_path: &Path,
+    language: &str,
+    scope: Option<&str>,
+    chunks: &mut Vec<CodeChunk>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "function_declaration" => {
+            if let Some(name) = find_child_text(&node, "simple_identifier", source) {
+                let entity_type = if scope.is_some() {
+                    "method"
+                } else {
+                    "function"
+                };
+                chunks.push(make_chunk(
+                    file_path,
+                    &node,
+                    source,
+                    &name,
+                    entity_type,
+                    language,
+                    scope,
+                ));
+            }
+        }
+        "class_declaration" | "struct_declaration" | "enum_declaration" => {
+            let name = find_child_text(&node, "type_identifier", source)
+                .or_else(|| find_child_text(&node, "simple_identifier", source));
+            if let Some(name) = &name {
+                let entity_type = match kind_str {
+                    "struct_declaration" => "struct",
+                    "enum_declaration" => "enum",
+                    _ => "class",
+                };
+                chunks.push(make_chunk(
+                    file_path,
+                    &node,
+                    source,
+                    name,
+                    entity_type,
+                    language,
+                    scope,
+                ));
+            }
+            let scope_name = name.as_deref();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_swift_chunks(child, source, file_path, language, scope_name, chunks);
+            }
+            return;
+        }
+        "protocol_declaration" => {
+            let name = find_child_text(&node, "type_identifier", source)
+                .or_else(|| find_child_text(&node, "simple_identifier", source));
+            if let Some(name) = &name {
+                chunks.push(make_chunk(
+                    file_path, &node, source, name, "protocol", language, scope,
+                ));
+            }
+            let scope_name = name.as_deref();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_swift_chunks(child, source, file_path, language, scope_name, chunks);
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_swift_chunks(child, source, file_path, language, scope, chunks);
     }
 }
 

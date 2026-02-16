@@ -20,6 +20,9 @@ tree-sitter-java = { workspace = true }
 tree-sitter-c = { workspace = true }
 tree-sitter-cpp = { workspace = true }
 tree-sitter-ruby = { workspace = true }
+tree-sitter-php = { workspace = true }
+tree-sitter-kotlin-ng = { workspace = true }
+tree-sitter-swift = { workspace = true }
 petgraph = { workspace = true }
 ignore = { workspace = true }
 serde = { workspace = true }
