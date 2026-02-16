@@ -3,6 +3,7 @@
 //! Provides the review pipeline: LLM client, prompt construction,
 //! review orchestration with filtering, and GitHub PR integration.
 
+pub mod feedback;
 pub mod github;
 pub mod llm;
 pub mod patch;
