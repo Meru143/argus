@@ -205,6 +205,10 @@ fn collect_symbols(
             collect_js_ts_symbols(node, source, file, false, symbols);
         }
         Language::Go => collect_go_symbols(node, source, file, symbols),
+        Language::Java => collect_java_symbols(node, source, file, false, symbols),
+        Language::C => collect_c_symbols(node, source, file, symbols),
+        Language::Cpp => collect_cpp_symbols(node, source, file, false, symbols),
+        Language::Ruby => collect_ruby_symbols(node, source, file, false, symbols),
         Language::Unknown => {}
     }
 }
@@ -514,6 +518,331 @@ fn collect_go_symbols(node: Node, source: &[u8], file: &PathBuf, symbols: &mut V
     for child in node.children(&mut cursor) {
         collect_go_symbols(child, source, file, symbols);
     }
+}
+
+fn collect_java_symbols(
+    node: Node,
+    source: &[u8],
+    file: &PathBuf,
+    inside_class: bool,
+    symbols: &mut Vec<Symbol>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "method_declaration" | "constructor_declaration" => {
+            if let Some(name) = find_child_text(&node, "identifier", source) {
+                let sig = extract_signature(&node, source);
+                let kind = if inside_class {
+                    SymbolKind::Method
+                } else {
+                    SymbolKind::Function
+                };
+                symbols.push(Symbol {
+                    name,
+                    kind,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        "class_declaration" => {
+            if let Some(name) = find_child_text(&node, "identifier", source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Class,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_java_symbols(child, source, file, true, symbols);
+            }
+            return;
+        }
+        "interface_declaration" => {
+            if let Some(name) = find_child_text(&node, "identifier", source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Interface,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_java_symbols(child, source, file, true, symbols);
+            }
+            return;
+        }
+        "enum_declaration" => {
+            if let Some(name) = find_child_text(&node, "identifier", source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Enum,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_java_symbols(child, source, file, inside_class, symbols);
+    }
+}
+
+fn collect_c_symbols(node: Node, source: &[u8], file: &PathBuf, symbols: &mut Vec<Symbol>) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "function_definition" | "declaration" => {
+            // For declarations, only match function declarations (with function_declarator)
+            if kind_str == "declaration" {
+                let has_func = child_has_kind(&node, "function_declarator");
+                if !has_func {
+                    // Skip non-function declarations, but recurse
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        collect_c_symbols(child, source, file, symbols);
+                    }
+                    return;
+                }
+            }
+            // Find the function name via function_declarator -> identifier
+            if let Some(name) = find_nested_function_name(&node, source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Function,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        "struct_specifier" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Struct,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        "enum_specifier" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Enum,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_c_symbols(child, source, file, symbols);
+    }
+}
+
+fn collect_cpp_symbols(
+    node: Node,
+    source: &[u8],
+    file: &PathBuf,
+    inside_class: bool,
+    symbols: &mut Vec<Symbol>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "function_definition" => {
+            if let Some(name) = find_nested_function_name(&node, source)
+                .or_else(|| find_child_text(&node, "identifier", source))
+            {
+                let sig = extract_signature(&node, source);
+                let kind = if inside_class {
+                    SymbolKind::Method
+                } else {
+                    SymbolKind::Function
+                };
+                symbols.push(Symbol {
+                    name,
+                    kind,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        "class_specifier" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Class,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_cpp_symbols(child, source, file, true, symbols);
+            }
+            return;
+        }
+        "struct_specifier" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Struct,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        "enum_specifier" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Enum,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_cpp_symbols(child, source, file, inside_class, symbols);
+    }
+}
+
+fn collect_ruby_symbols(
+    node: Node,
+    source: &[u8],
+    file: &PathBuf,
+    inside_class: bool,
+    symbols: &mut Vec<Symbol>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "method" => {
+            if let Some(name) = find_child_text(&node, "identifier", source) {
+                let sig = extract_signature(&node, source);
+                let kind = if inside_class {
+                    SymbolKind::Method
+                } else {
+                    SymbolKind::Function
+                };
+                symbols.push(Symbol {
+                    name,
+                    kind,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+        }
+        "class" => {
+            // Ruby class names can be constant or scope_resolution
+            let name = find_child_text(&node, "constant", source)
+                .or_else(|| find_child_text(&node, "scope_resolution", source));
+            if let Some(name) = name {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Class,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_ruby_symbols(child, source, file, true, symbols);
+            }
+            return;
+        }
+        "module" => {
+            if let Some(name) = find_child_text(&node, "constant", source) {
+                let sig = extract_signature(&node, source);
+                symbols.push(Symbol {
+                    name,
+                    kind: SymbolKind::Module,
+                    file: file.clone(),
+                    line: node.start_position().row as u32 + 1,
+                    token_cost: sig.len() / 4,
+                    signature: sig,
+                });
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_ruby_symbols(child, source, file, true, symbols);
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_ruby_symbols(child, source, file, inside_class, symbols);
+    }
+}
+
+/// Find the function name from a function_declarator child node.
+///
+/// In C/C++, function definitions have: type function_declarator(params) body
+/// The declarator contains the identifier.
+fn find_nested_function_name(node: &Node, source: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "function_declarator" {
+            return find_child_text(&child, "identifier", source)
+                .or_else(|| find_child_text(&child, "field_identifier", source));
+        }
+    }
+    None
 }
 
 fn collect_references(
@@ -837,6 +1166,175 @@ fn helper() {}
         assert!(
             ref_names.contains(&"Config"),
             "should find reference to Config: {ref_names:?}"
+        );
+    }
+
+    #[test]
+    fn parse_java_file() {
+        let file = SourceFile {
+            path: PathBuf::from("Main.java"),
+            language: Language::Java,
+            content: r#"
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello");
+    }
+    public int add(int a, int b) {
+        return a + b;
+    }
+}
+
+interface Runnable {
+    void run();
+}
+
+enum Color { RED, GREEN, BLUE }
+"#
+            .to_string(),
+        };
+        let symbols = extract_symbols(&file).unwrap();
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Main"), "should find class Main: {names:?}");
+        assert!(
+            names.contains(&"main"),
+            "should find method main: {names:?}"
+        );
+        assert!(names.contains(&"add"), "should find method add: {names:?}");
+        assert!(
+            names.contains(&"Runnable"),
+            "should find interface Runnable: {names:?}"
+        );
+        assert!(
+            names.contains(&"Color"),
+            "should find enum Color: {names:?}"
+        );
+    }
+
+    #[test]
+    fn parse_c_file() {
+        let file = SourceFile {
+            path: PathBuf::from("main.c"),
+            language: Language::C,
+            content: r#"
+struct Point {
+    int x;
+    int y;
+};
+
+enum Direction { NORTH, SOUTH, EAST, WEST };
+
+int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    return 0;
+}
+"#
+            .to_string(),
+        };
+        let symbols = extract_symbols(&file).unwrap();
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"Point"),
+            "should find struct Point: {names:?}"
+        );
+        assert!(
+            names.contains(&"Direction"),
+            "should find enum Direction: {names:?}"
+        );
+        assert!(
+            names.contains(&"add"),
+            "should find function add: {names:?}"
+        );
+        assert!(
+            names.contains(&"main"),
+            "should find function main: {names:?}"
+        );
+    }
+
+    #[test]
+    fn parse_cpp_file() {
+        let file = SourceFile {
+            path: PathBuf::from("main.cpp"),
+            language: Language::Cpp,
+            content: r#"
+class Calculator {
+public:
+    int add(int a, int b) {
+        return a + b;
+    }
+};
+
+struct Point {
+    int x, y;
+};
+
+int main() {
+    return 0;
+}
+"#
+            .to_string(),
+        };
+        let symbols = extract_symbols(&file).unwrap();
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"Calculator"),
+            "should find class Calculator: {names:?}"
+        );
+        assert!(names.contains(&"add"), "should find method add: {names:?}");
+        assert!(
+            names.contains(&"Point"),
+            "should find struct Point: {names:?}"
+        );
+        assert!(
+            names.contains(&"main"),
+            "should find function main: {names:?}"
+        );
+    }
+
+    #[test]
+    fn parse_ruby_file() {
+        let file = SourceFile {
+            path: PathBuf::from("app.rb"),
+            language: Language::Ruby,
+            content: r#"
+module MyApp
+  class Calculator
+    def add(a, b)
+      a + b
+    end
+
+    def subtract(a, b)
+      a - b
+    end
+  end
+end
+
+def standalone_function
+  puts "hello"
+end
+"#
+            .to_string(),
+        };
+        let symbols = extract_symbols(&file).unwrap();
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"MyApp"),
+            "should find module MyApp: {names:?}"
+        );
+        assert!(
+            names.contains(&"Calculator"),
+            "should find class Calculator: {names:?}"
+        );
+        assert!(names.contains(&"add"), "should find method add: {names:?}");
+        assert!(
+            names.contains(&"subtract"),
+            "should find method subtract: {names:?}"
+        );
+        assert!(
+            names.contains(&"standalone_function"),
+            "should find function standalone_function: {names:?}"
         );
     }
 }
