@@ -127,6 +127,7 @@ dependencies = [
  "clap_complete",
  "git2",
  "human-panic",
+ "indicatif",
  "miette",
  "rusqlite",
  "serde",

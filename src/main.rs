@@ -189,6 +189,19 @@ enum Command {
         /// Disable the self-reflection pass that filters false positives
         #[arg(long)]
         no_self_reflection: bool,
+        /// Incremental review: only review changes since the last review
+        #[arg(
+            long,
+            long_help = "Enable incremental review mode.\n\n\
+                Only review hunks that are NEW or CHANGED since the last review.\n\
+                Compares the current diff against a saved review state in .argus/review-state.json.\n\
+                On first run (no saved state), reviews everything and saves state.\n\
+                Use --base-sha to explicitly set the comparison point."
+        )]
+        incremental: bool,
+        /// Base commit SHA for incremental review (overrides saved state)
+        #[arg(long)]
+        base_sha: Option<String>,
     },
     /// Start the MCP server for IDE integration
     #[command(
@@ -201,6 +214,24 @@ enum Command {
         /// Repository path (default: current directory)
         #[arg(long, default_value = ".")]
         path: PathBuf,
+    },
+    /// Generate a PR title, description, and labels from a diff
+    #[command(
+        long_about = "Generate a PR title, description, and labels from a diff.\n\n\
+        Analyzes code changes and uses an LLM to produce a well-formatted PR description\n\
+        with conventional commit-style title, structured body, and suggested labels.\n\n\
+        Examples:\n  git diff main | argus describe\n  argus describe --file changes.patch\n  argus describe --pr owner/repo#123"
+    )]
+    Describe {
+        /// GitHub PR to describe (format: owner/repo#123)
+        #[arg(long)]
+        pr: Option<String>,
+        /// Read diff from file instead of stdin
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Repository path for codebase context
+        #[arg(long)]
+        repo: Option<PathBuf>,
     },
     /// Create a default .argus.toml configuration file
     #[command(long_about = "Create a default .argus.toml configuration file.\n\n\
@@ -260,6 +291,7 @@ fn print_welcome(use_color: bool) {
 
         println!("All commands:");
         println!("  \x1b[32mreview\x1b[0m    AI-powered code review (stdin, file, or GitHub PR)");
+        println!("  \x1b[32mdescribe\x1b[0m  Generate PR title, description, and labels");
         println!("  \x1b[32mmap\x1b[0m       Ranked codebase structure overview");
         println!("  \x1b[32msearch\x1b[0m    Semantic + keyword hybrid search");
         println!("  \x1b[32mhistory\x1b[0m   Hotspot detection, temporal coupling, bus factor");
@@ -276,6 +308,7 @@ fn print_welcome(use_color: bool) {
 
         println!("All commands:");
         println!("  review    AI-powered code review (stdin, file, or GitHub PR)");
+        println!("  describe  Generate PR title, description, and labels");
         println!("  map       Ranked codebase structure overview");
         println!("  search    Semantic + keyword hybrid search");
         println!("  history   Hotspot detection, temporal coupling, bus factor");
@@ -1044,6 +1077,8 @@ async fn main() -> Result<()> {
             show_filtered,
             apply_patches,
             no_self_reflection,
+            incremental: _,
+            base_sha: _,
         }) => {
             // Hint: suggest `argus init` when no config file exists
             if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
@@ -1242,6 +1277,128 @@ async fn main() -> Result<()> {
         }
         Some(Command::Mcp { ref path }) => {
             argus_mcp::server::run_server(path.clone()).await?;
+        }
+        Some(Command::Describe {
+            ref pr,
+            ref file,
+            ref repo,
+        }) => {
+            if cli.format == OutputFormat::Sarif {
+                miette::bail!("SARIF output is not supported for the describe subcommand.");
+            }
+
+            let diff_input = if let Some(pr_ref) = pr {
+                let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
+                let github = argus_review::github::GitHubClient::new(None)?;
+                github.get_pr_diff(&owner, &repo, pr_number).await?
+            } else {
+                read_diff_input(file)?
+            };
+
+            if diff_input.trim().is_empty() && pr.is_none() {
+                miette::bail!(miette::miette!(
+                    help = "Pipe a diff to argus, e.g.: git diff main | argus describe\n       Or use --file <path> or --pr owner/repo#123",
+                    "Empty diff input"
+                ));
+            }
+
+            // Hint: missing API key
+            let llm_env_var = match config.llm.provider.as_str() {
+                "anthropic" => "ANTHROPIC_API_KEY",
+                "gemini" => "GEMINI_API_KEY",
+                _ => "OPENAI_API_KEY",
+            };
+            if config.llm.api_key.is_none() && std::env::var(llm_env_var).is_err() {
+                miette::bail!(miette::miette!(
+                    help = "Set {llm_env_var} or add api_key in your .argus.toml under [llm]",
+                    "No API key configured for LLM provider '{}'",
+                    config.llm.provider
+                ));
+            }
+
+            // Generate repo map if a repo path is provided
+            let repo_map = if let Some(root) = repo {
+                let diffs = argus_difflens::parser::parse_unified_diff(&diff_input)?;
+                let focus_files: Vec<std::path::PathBuf> =
+                    diffs.iter().map(|d| d.new_path.clone()).collect();
+                match argus_repomap::generate_map(root, 1024, &focus_files, OutputFormat::Text) {
+                    Ok(map) if !map.is_empty() => Some(map),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
+            let llm_client = argus_review::llm::LlmClient::new(&config.llm)?;
+
+            let is_tty = std::io::stderr().is_terminal();
+            let spinner = if is_tty {
+                let pb = indicatif::ProgressBar::new_spinner();
+                pb.set_style(
+                    indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg} ({elapsed})")
+                        .unwrap(),
+                );
+                pb.set_message("Generating PR description...");
+                pb.enable_steady_tick(std::time::Duration::from_millis(120));
+                Some(pb)
+            } else {
+                None
+            };
+
+            let system = argus_review::prompt::build_describe_system_prompt();
+            let user =
+                argus_review::prompt::build_describe_prompt(&diff_input, repo_map.as_deref(), None);
+
+            let messages = vec![
+                argus_review::llm::ChatMessage {
+                    role: argus_review::llm::Role::System,
+                    content: system,
+                },
+                argus_review::llm::ChatMessage {
+                    role: argus_review::llm::Role::User,
+                    content: user,
+                },
+            ];
+
+            let response = llm_client.chat(messages).await.inspect_err(|_e| {
+                if let Some(pb) = &spinner {
+                    pb.finish_with_message("Failed");
+                }
+            })?;
+
+            let desc =
+                argus_review::prompt::parse_describe_response(&response).inspect_err(|_e| {
+                    if let Some(pb) = &spinner {
+                        pb.finish_with_message("Failed to parse response");
+                    }
+                })?;
+
+            if let Some(pb) = spinner {
+                pb.finish_with_message("Done");
+            }
+
+            match cli.format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&desc).into_diagnostic()?);
+                }
+                OutputFormat::Markdown => {
+                    println!("# {}\n", desc.title);
+                    println!("{}\n", desc.description);
+                    if !desc.labels.is_empty() {
+                        let labels: Vec<String> =
+                            desc.labels.iter().map(|l| format!("`{l}`")).collect();
+                        println!("**Labels:** {}", labels.join(", "));
+                    }
+                }
+                OutputFormat::Text => {
+                    println!("Title: {}\n", desc.title);
+                    println!("Description:\n{}\n", desc.description);
+                    if !desc.labels.is_empty() {
+                        println!("Labels: {}", desc.labels.join(", "));
+                    }
+                }
+                OutputFormat::Sarif => unreachable!(),
+            }
         }
         Some(Command::Init) => {
             let path = std::path::Path::new(".argus.toml");

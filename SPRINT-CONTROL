@@ -1,0 +1,4 @@
+# Sprint Control
+# Delete this file or set PAUSED=true to stop the sprint chain.
+
+PAUSED=false
