@@ -128,6 +128,9 @@ enum Command {
         /// Show comments that were filtered out, with reasons
         #[arg(long)]
         show_filtered: bool,
+        /// Apply suggested patches to the working tree
+        #[arg(long)]
+        apply_patches: bool,
     },
     /// Start the MCP server for IDE integration
     Mcp {
@@ -868,6 +871,7 @@ async fn main() -> Result<()> {
             include_suggestions,
             fail_on,
             show_filtered,
+            apply_patches,
         } => {
             let diff_input = if let Some(pr_ref) = pr {
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
@@ -977,6 +981,23 @@ async fn main() -> Result<()> {
                     eprintln!("  {}", fc.comment.message);
                 }
                 eprintln!("-------------------------");
+            }
+
+            if apply_patches {
+                let repo_root = repo.as_deref().unwrap_or(std::path::Path::new("."));
+                let patch_result =
+                    argus_review::patch::apply_patches(&result.comments, repo_root)?;
+                eprintln!(
+                    "{} patches applied, {} skipped",
+                    patch_result.applied.len(),
+                    patch_result.skipped.len(),
+                );
+                for ap in &patch_result.applied {
+                    eprintln!("  applied: {}:{}", ap.file_path, ap.line);
+                }
+                for sp in &patch_result.skipped {
+                    eprintln!("  skipped: {}:{} — {}", sp.file_path, sp.line, sp.reason);
+                }
             }
 
             if post_comments {

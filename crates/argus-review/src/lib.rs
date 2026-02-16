@@ -5,6 +5,7 @@
 
 pub mod github;
 pub mod llm;
+pub mod patch;
 pub mod pipeline;
 pub mod prompt;
 pub mod sarif;
