@@ -38,6 +38,12 @@ npx argus-ai --help
 npm install -g argus-ai
 ```
 
+### Cargo
+
+```bash
+cargo install argus-ai
+```
+
 ### From Source
 
 ```bash
