@@ -4,6 +4,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use argus_core::{ArgusError, OutputFormat, ReviewComment, ReviewConfig, Rule, Severity};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::Serialize;
 
 use argus_difflens::filter::{DiffFilter, SkippedFile};
@@ -264,12 +265,37 @@ impl ReviewPipeline {
 
             let is_tty = std::io::stderr().is_terminal();
             let group_count = groups.len();
-            if is_tty {
+            let mp = MultiProgress::new();
+
+            let main_pb = if is_tty {
                 let file_count: usize = groups.iter().map(|g| g.len()).sum();
-                eprintln!("Reviewing... ({file_count} files, {group_count} groups)");
-            }
+                let pb = mp.add(ProgressBar::new(group_count as u64));
+                pb.set_style(
+                    ProgressStyle::with_template(
+                        "{spinner:.cyan} Reviewing {msg} [{bar:20.cyan/dim}] {pos}/{len} groups ({elapsed})"
+                    )
+                    .unwrap()
+                    .progress_chars("━╸─"),
+                );
+                pb.set_message(format!("{file_count} files"));
+                pb.enable_steady_tick(std::time::Duration::from_millis(120));
+                Some(pb)
+            } else {
+                None
+            };
 
             for (i, group) in groups.iter().enumerate() {
+                let group_pb = if is_tty {
+                    let label = group_display_name(group.as_slice());
+                    let pb = mp.add(ProgressBar::new_spinner());
+                    pb.set_style(ProgressStyle::with_template("  {spinner:.dim} {msg}").unwrap());
+                    pb.set_message(format!("[{}/{}] {label}...", i + 1, group_count));
+                    pb.enable_steady_tick(std::time::Duration::from_millis(120));
+                    Some(pb)
+                } else {
+                    None
+                };
+
                 let group_diff_text = diffs_to_text(group);
                 let is_cross_file = group.len() > 1;
                 let user = prompt::build_review_prompt(
@@ -295,35 +321,45 @@ impl ReviewPipeline {
                 let response = self.llm.chat(messages).await?;
                 llm_calls += 1;
                 let mut parsed = prompt::parse_review_response(&response)?;
-                if is_tty {
+
+                if let Some(pb) = &group_pb {
                     let label = group_display_name(group.as_slice());
-                    let file_label = if group.len() == 1 { "file" } else { "files" };
-                    let comment_label = if parsed.len() == 1 {
-                        "comment"
-                    } else {
-                        "comments"
-                    };
-                    eprintln!(
-                        "  [{}/{}] {label} ({} {file_label})... {} {comment_label}",
+                    let comment_count = parsed.len();
+                    pb.finish_with_message(format!(
+                        "[{}/{}] {label} → {comment_count} comment{}",
                         i + 1,
                         group_count,
-                        group.len(),
-                        parsed.len(),
-                    );
+                        if comment_count == 1 { "" } else { "s" },
+                    ));
+                }
+                if let Some(pb) = &main_pb {
+                    pb.inc(1);
                 }
                 all_comments.append(&mut parsed);
+            }
+
+            if let Some(pb) = main_pb {
+                pb.finish_and_clear();
             }
         } else {
             // Single LLM call
             let is_tty = std::io::stderr().is_terminal();
-            if is_tty {
+            let spinner = if is_tty {
+                let pb = ProgressBar::new_spinner();
+                pb.set_style(
+                    ProgressStyle::with_template("{spinner:.cyan} {msg} ({elapsed})").unwrap(),
+                );
                 let file_label = if kept_diffs.len() == 1 {
                     "file"
                 } else {
                     "files"
                 };
-                eprintln!("Reviewing... ({} {file_label}, 1 group)", kept_diffs.len(),);
-            }
+                pb.set_message(format!("Reviewing {} {file_label}...", kept_diffs.len(),));
+                pb.enable_steady_tick(std::time::Duration::from_millis(120));
+                Some(pb)
+            } else {
+                None
+            };
 
             let is_cross_file = kept_diffs.len() > 1;
             let user = prompt::build_review_prompt(
@@ -349,16 +385,12 @@ impl ReviewPipeline {
             let response = self.llm.chat(messages).await?;
             llm_calls = 1;
             all_comments = prompt::parse_review_response(&response)?;
-            if is_tty {
-                let comment_label = if all_comments.len() == 1 {
-                    "comment"
-                } else {
-                    "comments"
-                };
-                eprintln!(
-                    "  [1/1] all files... {} {comment_label}",
+            if let Some(pb) = spinner {
+                pb.finish_with_message(format!(
+                    "Reviewed → {} comment{}",
                     all_comments.len(),
-                );
+                    if all_comments.len() == 1 { "" } else { "s" },
+                ));
             }
         }
 
@@ -373,16 +405,23 @@ impl ReviewPipeline {
         // 3.5. Self-reflection pass: filter false positives
         let (reflected, comments_reflected_out) =
             if self.config.self_reflection && !deduped.is_empty() {
-                let is_tty = std::io::stderr().is_terminal();
-                if is_tty {
-                    eprintln!("Self-reflecting on {} comments...", deduped.len());
-                }
+                let spinner = make_spinner("Self-reflecting on comments...");
                 match self
                     .self_reflect(&deduped, &diff_text, &mut llm_calls)
                     .await
                 {
-                    Ok((kept, removed_count)) => (kept, removed_count),
+                    Ok((kept, removed_count)) => {
+                        if let Some(pb) = spinner {
+                            pb.finish_with_message(format!(
+                                "Self-reflection → {removed_count} filtered out"
+                            ));
+                        }
+                        (kept, removed_count)
+                    }
                     Err(e) => {
+                        if let Some(pb) = spinner {
+                            pb.finish_with_message("Self-reflection failed, keeping all");
+                        }
                         eprintln!("warning: self-reflection failed ({e}), keeping all comments");
                         (deduped, 0)
                     }
@@ -397,7 +436,7 @@ impl ReviewPipeline {
 
         if std::io::stderr().is_terminal() {
             eprintln!(
-                "Done. {} comments ({} filtered, {} deduped, {} reflected out)",
+                "✓ Done. {} comments ({} filtered, {} deduped, {} reflected out)",
                 final_comments.len(),
                 comments_filtered,
                 comments_deduplicated,
@@ -407,10 +446,7 @@ impl ReviewPipeline {
 
         // 5. Generate summary if there are comments
         let summary = if !final_comments.is_empty() {
-            let is_tty = std::io::stderr().is_terminal();
-            if is_tty {
-                eprintln!("Generating summary...");
-            }
+            let spinner = make_spinner("Generating summary...");
             let summary_messages = vec![
                 ChatMessage {
                     role: Role::System,
@@ -424,9 +460,17 @@ impl ReviewPipeline {
             match self.llm.chat(summary_messages).await {
                 Ok(text) => {
                     llm_calls += 1;
+                    if let Some(pb) = spinner {
+                        pb.finish_with_message("Summary generated");
+                    }
                     Some(text.trim().to_string())
                 }
-                Err(_) => None,
+                Err(_) => {
+                    if let Some(pb) = spinner {
+                        pb.finish_with_message("Summary generation failed");
+                    }
+                    None
+                }
             }
         } else {
             None
@@ -509,6 +553,18 @@ impl ReviewPipeline {
 
         Ok((kept, removed))
     }
+}
+
+/// Create a stderr spinner that only displays when stderr is a terminal.
+fn make_spinner(message: &str) -> Option<ProgressBar> {
+    if !std::io::stderr().is_terminal() {
+        return None;
+    }
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(ProgressStyle::with_template("{spinner:.cyan} {msg} ({elapsed})").unwrap());
+    pb.set_message(message.to_string());
+    pb.enable_steady_tick(std::time::Duration::from_millis(120));
+    Some(pb)
 }
 
 fn diffs_to_text<D: std::borrow::Borrow<FileDiff>>(diffs: &[D]) -> String {

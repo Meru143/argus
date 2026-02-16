@@ -64,6 +64,7 @@ sha2 = "0.10"
 rmcp = { version = "0.15", features = ["server", "transport-io"] }
 miette = { version = "7", features = ["fancy"] }
 human-panic = "2"
+indicatif = "0.17"
 
 [package]
 name = "argus-ai"
