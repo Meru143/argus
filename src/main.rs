@@ -186,6 +186,9 @@ enum Command {
         /// Apply suggested patches to the working tree
         #[arg(long)]
         apply_patches: bool,
+        /// Disable the self-reflection pass that filters false positives
+        #[arg(long)]
+        no_self_reflection: bool,
     },
     /// Start the MCP server for IDE integration
     #[command(
@@ -581,6 +584,8 @@ const DEFAULT_CONFIG: &str = r#"# Argus Configuration
 # skip_patterns = ["*.lock", "*.min.js", "vendor/**"]
 # min_confidence = 90
 # include_suggestions = false
+# self_reflection = true
+# self_reflection_score_threshold = 7
 
 [embedding]
 # provider = "voyage"
@@ -1038,6 +1043,7 @@ async fn main() -> Result<()> {
             fail_on,
             show_filtered,
             apply_patches,
+            no_self_reflection,
         }) => {
             // Hint: suggest `argus init` when no config file exists
             if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
@@ -1084,6 +1090,9 @@ async fn main() -> Result<()> {
                         .severity_filter
                         .push(argus_core::Severity::Suggestion);
                 }
+            }
+            if no_self_reflection {
+                review_config.self_reflection = false;
             }
 
             // Hint: missing API key — check before creating the LLM client
@@ -1135,10 +1144,11 @@ async fn main() -> Result<()> {
                     eprintln!("  (diff was split into per-file calls)");
                 }
                 eprintln!(
-                    "Comments: {} generated, {} filtered, {} deduplicated, {} final",
+                    "Comments: {} generated, {} filtered, {} deduplicated, {} reflected out, {} final",
                     result.stats.comments_generated,
                     result.stats.comments_filtered,
                     result.stats.comments_deduplicated,
+                    result.stats.comments_reflected_out,
                     result.comments.len(),
                 );
                 eprintln!("--------------------");

@@ -168,6 +168,8 @@ impl Default for LlmConfig {
 /// assert!(!config.include_suggestions);
 /// assert_eq!(config.max_diff_tokens, 4000);
 /// assert!(config.cross_file);
+/// assert!(config.self_reflection);
+/// assert_eq!(config.self_reflection_score_threshold, 7);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewConfig {
@@ -195,6 +197,15 @@ pub struct ReviewConfig {
     /// Group related files for cross-file analysis when splitting diffs (default: true).
     #[serde(default = "default_cross_file")]
     pub cross_file: bool,
+    /// Enable self-reflection pass to filter false positives (default: true).
+    ///
+    /// When enabled, a second LLM call evaluates the initial review comments
+    /// and filters out low-quality ones (style nits, speculative issues, etc.).
+    #[serde(default = "default_self_reflection")]
+    pub self_reflection: bool,
+    /// Minimum score (1-10) a comment must receive during self-reflection to be kept (default: 7).
+    #[serde(default = "default_self_reflection_score_threshold")]
+    pub self_reflection_score_threshold: u8,
 }
 
 fn default_max_comments() -> usize {
@@ -217,6 +228,14 @@ fn default_cross_file() -> bool {
     true
 }
 
+fn default_self_reflection() -> bool {
+    true
+}
+
+fn default_self_reflection_score_threshold() -> u8 {
+    7
+}
+
 impl Default for ReviewConfig {
     fn default() -> Self {
         Self {
@@ -228,6 +247,8 @@ impl Default for ReviewConfig {
             max_diff_tokens: default_max_diff_tokens(),
             include_suggestions: false,
             cross_file: default_cross_file(),
+            self_reflection: default_self_reflection(),
+            self_reflection_score_threshold: default_self_reflection_score_threshold(),
         }
     }
 }
@@ -323,6 +344,8 @@ mod tests {
         assert_eq!(config.embedding.model, "voyage-code-3");
         assert_eq!(config.embedding.dimensions, 1024);
         assert!(config.paths.is_empty());
+        assert!(config.review.self_reflection);
+        assert_eq!(config.review.self_reflection_score_threshold, 7);
     }
 
     #[test]

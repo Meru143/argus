@@ -114,6 +114,15 @@ pub fn chunk_file(
         Language::Go => {
             collect_go_chunks(tree.root_node(), source, path, lang_str, None, &mut chunks)
         }
+        Language::Java => {
+            collect_java_chunks(tree.root_node(), source, path, lang_str, None, &mut chunks)
+        }
+        Language::C | Language::Cpp => {
+            collect_c_cpp_chunks(tree.root_node(), source, path, lang_str, None, &mut chunks)
+        }
+        Language::Ruby => {
+            collect_ruby_chunks(tree.root_node(), source, path, lang_str, None, &mut chunks)
+        }
         Language::Unknown => {}
     }
 
@@ -154,6 +163,10 @@ fn language_str(lang: Language) -> &'static str {
         Language::TypeScript => "typescript",
         Language::JavaScript => "javascript",
         Language::Go => "go",
+        Language::Java => "java",
+        Language::C => "c",
+        Language::Cpp => "cpp",
+        Language::Ruby => "ruby",
         Language::Unknown => "unknown",
     }
 }
@@ -514,6 +527,226 @@ fn collect_go_chunks(
     for child in node.children(&mut cursor) {
         collect_go_chunks(child, source, file_path, language, None, chunks);
     }
+}
+
+fn collect_java_chunks(
+    node: Node,
+    source: &[u8],
+    file_path: &Path,
+    language: &str,
+    scope: Option<&str>,
+    chunks: &mut Vec<CodeChunk>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "method_declaration" | "constructor_declaration" => {
+            if let Some(name) = find_child_text(&node, "identifier", source) {
+                let entity_type = if scope.is_some() {
+                    "method"
+                } else {
+                    "function"
+                };
+                chunks.push(make_chunk(
+                    file_path,
+                    &node,
+                    source,
+                    &name,
+                    entity_type,
+                    language,
+                    scope,
+                ));
+            }
+        }
+        "class_declaration" => {
+            let name = find_child_text(&node, "identifier", source);
+            if let Some(name) = &name {
+                chunks.push(make_chunk(
+                    file_path, &node, source, name, "class", language, scope,
+                ));
+            }
+            let scope_name = name.as_deref();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_java_chunks(child, source, file_path, language, scope_name, chunks);
+            }
+            return;
+        }
+        "interface_declaration" => {
+            if let Some(name) = find_child_text(&node, "identifier", source) {
+                chunks.push(make_chunk(
+                    file_path,
+                    &node,
+                    source,
+                    &name,
+                    "interface",
+                    language,
+                    scope,
+                ));
+            }
+        }
+        "enum_declaration" => {
+            if let Some(name) = find_child_text(&node, "identifier", source) {
+                chunks.push(make_chunk(
+                    file_path, &node, source, &name, "enum", language, scope,
+                ));
+            }
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_java_chunks(child, source, file_path, language, scope, chunks);
+    }
+}
+
+fn collect_c_cpp_chunks(
+    node: Node,
+    source: &[u8],
+    file_path: &Path,
+    language: &str,
+    scope: Option<&str>,
+    chunks: &mut Vec<CodeChunk>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "function_definition" => {
+            // C/C++ function names are in function_declarator -> identifier
+            let name = find_nested_func_name(&node, source)
+                .or_else(|| find_child_text(&node, "identifier", source));
+            if let Some(name) = name {
+                let entity_type = if scope.is_some() {
+                    "method"
+                } else {
+                    "function"
+                };
+                chunks.push(make_chunk(
+                    file_path,
+                    &node,
+                    source,
+                    &name,
+                    entity_type,
+                    language,
+                    scope,
+                ));
+            }
+        }
+        "class_specifier" => {
+            let name = find_child_text(&node, "type_identifier", source);
+            if let Some(name) = &name {
+                chunks.push(make_chunk(
+                    file_path, &node, source, name, "class", language, scope,
+                ));
+            }
+            let scope_name = name.as_deref();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_c_cpp_chunks(child, source, file_path, language, scope_name, chunks);
+            }
+            return;
+        }
+        "struct_specifier" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source) {
+                chunks.push(make_chunk(
+                    file_path, &node, source, &name, "struct", language, scope,
+                ));
+            }
+        }
+        "enum_specifier" => {
+            if let Some(name) = find_child_text(&node, "type_identifier", source) {
+                chunks.push(make_chunk(
+                    file_path, &node, source, &name, "enum", language, scope,
+                ));
+            }
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_c_cpp_chunks(child, source, file_path, language, scope, chunks);
+    }
+}
+
+fn collect_ruby_chunks(
+    node: Node,
+    source: &[u8],
+    file_path: &Path,
+    language: &str,
+    scope: Option<&str>,
+    chunks: &mut Vec<CodeChunk>,
+) {
+    let kind_str = node.kind();
+
+    match kind_str {
+        "method" => {
+            if let Some(name) = find_child_text(&node, "identifier", source) {
+                let entity_type = if scope.is_some() {
+                    "method"
+                } else {
+                    "function"
+                };
+                chunks.push(make_chunk(
+                    file_path,
+                    &node,
+                    source,
+                    &name,
+                    entity_type,
+                    language,
+                    scope,
+                ));
+            }
+        }
+        "class" => {
+            let name = find_child_text(&node, "constant", source)
+                .or_else(|| find_child_text(&node, "scope_resolution", source));
+            if let Some(name) = &name {
+                chunks.push(make_chunk(
+                    file_path, &node, source, name, "class", language, scope,
+                ));
+            }
+            let scope_name = name.as_deref();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_ruby_chunks(child, source, file_path, language, scope_name, chunks);
+            }
+            return;
+        }
+        "module" => {
+            let name = find_child_text(&node, "constant", source);
+            if let Some(name) = &name {
+                chunks.push(make_chunk(
+                    file_path, &node, source, name, "module", language, scope,
+                ));
+            }
+            let scope_name = name.as_deref();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_ruby_chunks(child, source, file_path, language, scope_name, chunks);
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_ruby_chunks(child, source, file_path, language, scope, chunks);
+    }
+}
+
+/// Find the function name from a function_declarator child in C/C++.
+fn find_nested_func_name(node: &Node, source: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "function_declarator" {
+            return find_child_text(&child, "identifier", source)
+                .or_else(|| find_child_text(&child, "field_identifier", source));
+        }
+    }
+    None
 }
 
 #[cfg(test)]

@@ -42,6 +42,10 @@ pub struct SourceFile {
 ///
 /// assert_eq!(Language::from_extension("rs"), Language::Rust);
 /// assert_eq!(Language::from_extension("py"), Language::Python);
+/// assert_eq!(Language::from_extension("java"), Language::Java);
+/// assert_eq!(Language::from_extension("c"), Language::C);
+/// assert_eq!(Language::from_extension("cpp"), Language::Cpp);
+/// assert_eq!(Language::from_extension("rb"), Language::Ruby);
 /// assert_eq!(Language::from_extension("txt"), Language::Unknown);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -51,6 +55,10 @@ pub enum Language {
     TypeScript,
     JavaScript,
     Go,
+    Java,
+    C,
+    Cpp,
+    Ruby,
     Unknown,
 }
 
@@ -63,6 +71,10 @@ impl Language {
             "ts" | "tsx" => Language::TypeScript,
             "js" | "jsx" => Language::JavaScript,
             "go" => Language::Go,
+            "java" => Language::Java,
+            "c" | "h" => Language::C,
+            "cpp" | "cc" | "cxx" | "hpp" | "hxx" | "hh" => Language::Cpp,
+            "rb" => Language::Ruby,
             _ => Language::Unknown,
         }
     }
@@ -77,6 +89,10 @@ impl Language {
             Language::TypeScript => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
             Language::JavaScript => Some(tree_sitter_javascript::LANGUAGE.into()),
             Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
+            Language::Java => Some(tree_sitter_java::LANGUAGE.into()),
+            Language::C => Some(tree_sitter_c::LANGUAGE.into()),
+            Language::Cpp => Some(tree_sitter_cpp::LANGUAGE.into()),
+            Language::Ruby => Some(tree_sitter_ruby::LANGUAGE.into()),
             Language::Unknown => None,
         }
     }
@@ -184,6 +200,14 @@ mod tests {
         fs::write(root.join("src/app.ts"), "function run() {}").unwrap();
         fs::write(root.join("src/util.js"), "const x = 1;").unwrap();
         fs::write(root.join("src/main.go"), "package main").unwrap();
+        fs::write(
+            root.join("src/Main.java"),
+            "public class Main { public static void main(String[] args) {} }",
+        )
+        .unwrap();
+        fs::write(root.join("src/hello.c"), "int main() { return 0; }").unwrap();
+        fs::write(root.join("src/hello.cpp"), "int main() { return 0; }").unwrap();
+        fs::write(root.join("src/hello.rb"), "def hello; end").unwrap();
 
         // Create unknown extension file
         fs::write(root.join("README.md"), "# Hello").unwrap();
@@ -197,7 +221,7 @@ mod tests {
         let dir = make_temp_repo();
         let files = walk_repo(dir.path()).unwrap();
 
-        assert_eq!(files.len(), 5);
+        assert_eq!(files.len(), 9);
 
         let languages: Vec<Language> = files.iter().map(|f| f.language).collect();
         assert!(languages.contains(&Language::Rust));
@@ -205,6 +229,10 @@ mod tests {
         assert!(languages.contains(&Language::TypeScript));
         assert!(languages.contains(&Language::JavaScript));
         assert!(languages.contains(&Language::Go));
+        assert!(languages.contains(&Language::Java));
+        assert!(languages.contains(&Language::C));
+        assert!(languages.contains(&Language::Cpp));
+        assert!(languages.contains(&Language::Ruby));
     }
 
     #[test]

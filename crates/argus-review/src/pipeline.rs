@@ -4,6 +4,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use argus_core::{ArgusError, OutputFormat, ReviewComment, ReviewConfig, Rule, Severity};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::Serialize;
 
 use argus_difflens::filter::{DiffFilter, SkippedFile};
@@ -30,6 +31,7 @@ use crate::prompt;
 ///         comments_generated: 0,
 ///         comments_filtered: 0,
 ///         comments_deduplicated: 0,
+///         comments_reflected_out: 0,
 ///         skipped_files: vec![],
 ///         model_used: "gpt-4o".into(),
 ///         llm_calls: 0,
@@ -100,6 +102,7 @@ pub struct FilteredComment {
 ///     comments_generated: 10,
 ///     comments_filtered: 7,
 ///     comments_deduplicated: 1,
+///     comments_reflected_out: 2,
 ///     skipped_files: vec![],
 ///     model_used: "gpt-4o".into(),
 ///     llm_calls: 2,
@@ -122,6 +125,8 @@ pub struct ReviewStats {
     pub comments_filtered: usize,
     /// Duplicate comments merged.
     pub comments_deduplicated: usize,
+    /// Comments removed by self-reflection pass.
+    pub comments_reflected_out: usize,
     /// Files that were skipped with reasons.
     #[serde(skip)]
     pub skipped_files: Vec<SkippedFile>,
@@ -191,6 +196,7 @@ impl ReviewPipeline {
                     comments_generated: 0,
                     comments_filtered: 0,
                     comments_deduplicated: 0,
+                    comments_reflected_out: 0,
                     skipped_files,
                     model_used: self.llm.model().to_string(),
                     llm_calls: 0,
@@ -259,12 +265,37 @@ impl ReviewPipeline {
 
             let is_tty = std::io::stderr().is_terminal();
             let group_count = groups.len();
-            if is_tty {
+            let mp = MultiProgress::new();
+
+            let main_pb = if is_tty {
                 let file_count: usize = groups.iter().map(|g| g.len()).sum();
-                eprintln!("Reviewing... ({file_count} files, {group_count} groups)");
-            }
+                let pb = mp.add(ProgressBar::new(group_count as u64));
+                pb.set_style(
+                    ProgressStyle::with_template(
+                        "{spinner:.cyan} Reviewing {msg} [{bar:20.cyan/dim}] {pos}/{len} groups ({elapsed})"
+                    )
+                    .unwrap()
+                    .progress_chars("━╸─"),
+                );
+                pb.set_message(format!("{file_count} files"));
+                pb.enable_steady_tick(std::time::Duration::from_millis(120));
+                Some(pb)
+            } else {
+                None
+            };
 
             for (i, group) in groups.iter().enumerate() {
+                let group_pb = if is_tty {
+                    let label = group_display_name(group.as_slice());
+                    let pb = mp.add(ProgressBar::new_spinner());
+                    pb.set_style(ProgressStyle::with_template("  {spinner:.dim} {msg}").unwrap());
+                    pb.set_message(format!("[{}/{}] {label}...", i + 1, group_count));
+                    pb.enable_steady_tick(std::time::Duration::from_millis(120));
+                    Some(pb)
+                } else {
+                    None
+                };
+
                 let group_diff_text = diffs_to_text(group);
                 let is_cross_file = group.len() > 1;
                 let user = prompt::build_review_prompt(
@@ -290,35 +321,45 @@ impl ReviewPipeline {
                 let response = self.llm.chat(messages).await?;
                 llm_calls += 1;
                 let mut parsed = prompt::parse_review_response(&response)?;
-                if is_tty {
+
+                if let Some(pb) = &group_pb {
                     let label = group_display_name(group.as_slice());
-                    let file_label = if group.len() == 1 { "file" } else { "files" };
-                    let comment_label = if parsed.len() == 1 {
-                        "comment"
-                    } else {
-                        "comments"
-                    };
-                    eprintln!(
-                        "  [{}/{}] {label} ({} {file_label})... {} {comment_label}",
+                    let comment_count = parsed.len();
+                    pb.finish_with_message(format!(
+                        "[{}/{}] {label} → {comment_count} comment{}",
                         i + 1,
                         group_count,
-                        group.len(),
-                        parsed.len(),
-                    );
+                        if comment_count == 1 { "" } else { "s" },
+                    ));
+                }
+                if let Some(pb) = &main_pb {
+                    pb.inc(1);
                 }
                 all_comments.append(&mut parsed);
+            }
+
+            if let Some(pb) = main_pb {
+                pb.finish_and_clear();
             }
         } else {
             // Single LLM call
             let is_tty = std::io::stderr().is_terminal();
-            if is_tty {
+            let spinner = if is_tty {
+                let pb = ProgressBar::new_spinner();
+                pb.set_style(
+                    ProgressStyle::with_template("{spinner:.cyan} {msg} ({elapsed})").unwrap(),
+                );
                 let file_label = if kept_diffs.len() == 1 {
                     "file"
                 } else {
                     "files"
                 };
-                eprintln!("Reviewing... ({} {file_label}, 1 group)", kept_diffs.len(),);
-            }
+                pb.set_message(format!("Reviewing {} {file_label}...", kept_diffs.len(),));
+                pb.enable_steady_tick(std::time::Duration::from_millis(120));
+                Some(pb)
+            } else {
+                None
+            };
 
             let is_cross_file = kept_diffs.len() > 1;
             let user = prompt::build_review_prompt(
@@ -344,16 +385,12 @@ impl ReviewPipeline {
             let response = self.llm.chat(messages).await?;
             llm_calls = 1;
             all_comments = prompt::parse_review_response(&response)?;
-            if is_tty {
-                let comment_label = if all_comments.len() == 1 {
-                    "comment"
-                } else {
-                    "comments"
-                };
-                eprintln!(
-                    "  [1/1] all files... {} {comment_label}",
+            if let Some(pb) = spinner {
+                pb.finish_with_message(format!(
+                    "Reviewed → {} comment{}",
                     all_comments.len(),
-                );
+                    if all_comments.len() == 1 { "" } else { "s" },
+                ));
             }
         }
 
@@ -365,25 +402,51 @@ impl ReviewPipeline {
         // 3. Deduplicate
         let (deduped, comments_deduplicated) = deduplicate(all_comments);
 
+        // 3.5. Self-reflection pass: filter false positives
+        let (reflected, comments_reflected_out) =
+            if self.config.self_reflection && !deduped.is_empty() {
+                let spinner = make_spinner("Self-reflecting on comments...");
+                match self
+                    .self_reflect(&deduped, &diff_text, &mut llm_calls)
+                    .await
+                {
+                    Ok((kept, removed_count)) => {
+                        if let Some(pb) = spinner {
+                            pb.finish_with_message(format!(
+                                "Self-reflection → {removed_count} filtered out"
+                            ));
+                        }
+                        (kept, removed_count)
+                    }
+                    Err(e) => {
+                        if let Some(pb) = spinner {
+                            pb.finish_with_message("Self-reflection failed, keeping all");
+                        }
+                        eprintln!("warning: self-reflection failed ({e}), keeping all comments");
+                        (deduped, 0)
+                    }
+                }
+            } else {
+                (deduped, 0)
+            };
+
         // 4. Filter and sort
-        let (final_comments, filtered_comments) = filter_and_sort(deduped, &self.config);
+        let (final_comments, filtered_comments) = filter_and_sort(reflected, &self.config);
         let comments_filtered = filtered_comments.len();
 
         if std::io::stderr().is_terminal() {
             eprintln!(
-                "Done. {} comments ({} filtered, {} deduped)",
+                "✓ Done. {} comments ({} filtered, {} deduped, {} reflected out)",
                 final_comments.len(),
                 comments_filtered,
                 comments_deduplicated,
+                comments_reflected_out,
             );
         }
 
         // 5. Generate summary if there are comments
         let summary = if !final_comments.is_empty() {
-            let is_tty = std::io::stderr().is_terminal();
-            if is_tty {
-                eprintln!("Generating summary...");
-            }
+            let spinner = make_spinner("Generating summary...");
             let summary_messages = vec![
                 ChatMessage {
                     role: Role::System,
@@ -397,9 +460,17 @@ impl ReviewPipeline {
             match self.llm.chat(summary_messages).await {
                 Ok(text) => {
                     llm_calls += 1;
+                    if let Some(pb) = spinner {
+                        pb.finish_with_message("Summary generated");
+                    }
                     Some(text.trim().to_string())
                 }
-                Err(_) => None,
+                Err(_) => {
+                    if let Some(pb) = spinner {
+                        pb.finish_with_message("Summary generation failed");
+                    }
+                    None
+                }
             }
         } else {
             None
@@ -416,6 +487,7 @@ impl ReviewPipeline {
                 comments_generated,
                 comments_filtered,
                 comments_deduplicated,
+                comments_reflected_out,
                 skipped_files,
                 model_used: self.llm.model().to_string(),
                 llm_calls,
@@ -423,6 +495,76 @@ impl ReviewPipeline {
             },
         })
     }
+
+    /// Run self-reflection on the generated comments.
+    ///
+    /// Sends the comments and diff to the LLM for a second evaluation pass.
+    /// Comments scoring below `self_reflection_score_threshold` are removed.
+    /// Returns the surviving comments and the count of removed ones.
+    async fn self_reflect(
+        &self,
+        comments: &[ReviewComment],
+        diff_text: &str,
+        llm_calls: &mut usize,
+    ) -> Result<(Vec<ReviewComment>, usize), ArgusError> {
+        let reflection_prompt = prompt::build_self_reflection_prompt(comments, diff_text);
+        let messages = vec![
+            ChatMessage {
+                role: Role::System,
+                content: "You are a senior code reviewer evaluating AI-generated review comments. \
+                          Be critical — only high-quality, verifiable issues should pass."
+                    .into(),
+            },
+            ChatMessage {
+                role: Role::User,
+                content: reflection_prompt,
+            },
+        ];
+
+        let response = self.llm.chat(messages).await?;
+        *llm_calls += 1;
+
+        let evaluations = prompt::parse_self_reflection_response(&response)?;
+
+        // Build a score map: index -> (score, optional revised severity)
+        let mut score_map: HashMap<usize, (u8, Option<Severity>)> = HashMap::new();
+        for (idx, score, revised_sev) in evaluations {
+            score_map.insert(idx, (score, revised_sev));
+        }
+
+        let threshold = self.config.self_reflection_score_threshold;
+        let mut kept = Vec::new();
+        let mut removed = 0usize;
+
+        for (i, mut comment) in comments.iter().cloned().enumerate() {
+            if let Some((score, revised_sev)) = score_map.get(&i) {
+                if *score < threshold {
+                    removed += 1;
+                    continue;
+                }
+                // Apply revised severity if provided
+                if let Some(sev) = revised_sev {
+                    comment.severity = *sev;
+                }
+            }
+            // If a comment wasn't evaluated (LLM missed it), keep it
+            kept.push(comment);
+        }
+
+        Ok((kept, removed))
+    }
+}
+
+/// Create a stderr spinner that only displays when stderr is a terminal.
+fn make_spinner(message: &str) -> Option<ProgressBar> {
+    if !std::io::stderr().is_terminal() {
+        return None;
+    }
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(ProgressStyle::with_template("{spinner:.cyan} {msg} ({elapsed})").unwrap());
+    pb.set_message(message.to_string());
+    pb.enable_steady_tick(std::time::Duration::from_millis(120));
+    Some(pb)
 }
 
 fn diffs_to_text<D: std::borrow::Borrow<FileDiff>>(diffs: &[D]) -> String {
@@ -789,7 +931,7 @@ impl fmt::Display for ReviewResult {
         writeln!(f, "==============")?;
         writeln!(
             f,
-            "Model: {} | Files: {} (skipped: {}) | Hunks: {} | Comments: {} (filtered: {}, deduped: {}) | LLM calls: {}\n",
+            "Model: {} | Files: {} (skipped: {}) | Hunks: {} | Comments: {} (filtered: {}, deduped: {}, reflected: {}) | LLM calls: {}\n",
             self.stats.model_used,
             self.stats.files_reviewed,
             self.stats.files_skipped,
@@ -797,6 +939,7 @@ impl fmt::Display for ReviewResult {
             self.comments.len(),
             self.stats.comments_filtered,
             self.stats.comments_deduplicated,
+            self.stats.comments_reflected_out,
             self.stats.llm_calls,
         )?;
 
@@ -876,6 +1019,7 @@ impl ReviewResult {
     ///         comments_generated: 0,
     ///         comments_filtered: 0,
     ///         comments_deduplicated: 0,
+    ///         comments_reflected_out: 0,
     ///         skipped_files: vec![],
     ///         model_used: "gpt-4o".into(),
     ///         llm_calls: 0,
@@ -889,7 +1033,7 @@ impl ReviewResult {
         let mut out = String::new();
         out.push_str("# Review Results\n\n");
         out.push_str(&format!(
-            "**Model:** {} | **Files:** {} (skipped: {}) | **Hunks:** {} | **Comments:** {} (filtered: {}, deduped: {}) | **LLM calls:** {}\n\n",
+            "**Model:** {} | **Files:** {} (skipped: {}) | **Hunks:** {} | **Comments:** {} (filtered: {}, deduped: {}, reflected: {}) | **LLM calls:** {}\n\n",
             self.stats.model_used,
             self.stats.files_reviewed,
             self.stats.files_skipped,
@@ -897,6 +1041,7 @@ impl ReviewResult {
             self.comments.len(),
             self.stats.comments_filtered,
             self.stats.comments_deduplicated,
+            self.stats.comments_reflected_out,
             self.stats.llm_calls,
         ));
 
@@ -1141,6 +1286,7 @@ mod tests {
                 comments_generated: 1,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 1,
@@ -1368,6 +1514,7 @@ mod tests {
                 comments_generated: 1,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 2,
@@ -1391,6 +1538,7 @@ mod tests {
                 comments_generated: 0,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 0,
@@ -1423,6 +1571,7 @@ mod tests {
                 comments_generated: 1,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 2,
@@ -1455,6 +1604,7 @@ mod tests {
                 comments_generated: 1,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 1,
@@ -1489,6 +1639,7 @@ mod tests {
                 comments_generated: 1,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 1,
