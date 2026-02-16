@@ -235,6 +235,16 @@ enum Command {
         #[arg(long)]
         repo: Option<PathBuf>,
     },
+    /// Provide feedback on review comments (thumbs up/down)
+    #[command(long_about = "Provide feedback on review comments.\n\n\
+        Interactive mode that loads the most recent review and allows you to\n\
+        rate comments as useful (\u{1F44D}) or not useful (\u{1F44E}).\n\n\
+        Your feedback is stored locally and used to improve future reviews.")]
+    Feedback {
+        /// Repository path (default: current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
     /// Create a default .argus.toml configuration file
     #[command(long_about = "Create a default .argus.toml configuration file.\n\n\
         Generates a commented-out template with all available options.\n\
@@ -1326,6 +1336,16 @@ async fn main() -> Result<()> {
                 }
             }
 
+            // Save last review result for feedback command
+            let argus_dir = repo_root.join(".argus");
+            if !argus_dir.exists() {
+                std::fs::create_dir_all(&argus_dir).into_diagnostic()?;
+            }
+            let last_review_path = argus_dir.join("last-review.json");
+            if let Ok(json) = serde_json::to_string(&result.comments) {
+                let _ = std::fs::write(last_review_path, json);
+            }
+
             if let Some(threshold) = fail_on {
                 let has_findings = result
                     .comments
@@ -1460,6 +1480,74 @@ async fn main() -> Result<()> {
                 }
                 OutputFormat::Sarif => unreachable!(),
             }
+        }
+        Some(Command::Feedback { ref path }) => {
+            let argus_dir = path.join(".argus");
+            let last_review_path = argus_dir.join("last-review.json");
+
+            if !last_review_path.exists() {
+                miette::bail!("No previous review found. Run 'argus review' first.");
+            }
+
+            let content = std::fs::read_to_string(&last_review_path).into_diagnostic()?;
+            let comments: Vec<argus_core::ReviewComment> =
+                serde_json::from_str(&content).into_diagnostic()?;
+
+            if comments.is_empty() {
+                println!("No comments to review.");
+                return Ok(());
+            }
+
+            println!("Loaded {} comments from last review.\n", comments.len());
+            println!(
+                "Rate each comment as useful (y/+) or not useful (n/-). Press 's' to skip or 'q' to quit.\n"
+            );
+
+            let store = argus_review::feedback::FeedbackStore::open(path).into_diagnostic()?;
+
+            for (i, c) in comments.iter().enumerate() {
+                println!("--- Comment {}/{} ---", i + 1, comments.len());
+                println!("[{}] {}:{}", c.severity, c.file_path.display(), c.line);
+                println!("{}", c.message);
+                if let Some(sug) = &c.suggestion {
+                    println!("Suggestion: {}", sug);
+                }
+                println!();
+
+                loop {
+                    print!("Useful? [y/n/s/q]: ");
+                    use std::io::Write;
+                    std::io::stdout().flush().into_diagnostic()?;
+
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input).into_diagnostic()?;
+                    let input = input.trim().to_lowercase();
+
+                    match input.as_str() {
+                        "y" | "+" | "yes" => {
+                            store.add_feedback(c, "positive").into_diagnostic()?;
+                            println!("Saved: 👍");
+                            break;
+                        }
+                        "n" | "-" | "no" => {
+                            store.add_feedback(c, "negative").into_diagnostic()?;
+                            println!("Saved: 👎 (will be suppressed in future)");
+                            break;
+                        }
+                        "s" | "skip" => {
+                            println!("Skipped.");
+                            break;
+                        }
+                        "q" | "quit" => {
+                            println!("Exiting.");
+                            return Ok(());
+                        }
+                        _ => println!("Invalid input. Use y, n, s, or q."),
+                    }
+                }
+                println!();
+            }
+            println!("Feedback session complete. Thank you!");
         }
         Some(Command::Init) => {
             let path = std::path::Path::new(".argus.toml");
