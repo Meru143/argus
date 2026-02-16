@@ -102,6 +102,7 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 rusqlite = { workspace = true }
 git2 = { workspace = true }
+indicatif = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
