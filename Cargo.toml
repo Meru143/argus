@@ -12,8 +12,13 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
+description = "AI code review platform — your coding agent shouldn't grade its own homework"
+repository = "https://github.com/Meru143/argus"
+homepage = "https://github.com/Meru143/argus"
+keywords = ["code-review", "ai", "llm", "cli", "mcp"]
+categories = ["command-line-utilities", "development-tools"]
 
 [workspace.metadata.dist]
 cargo-dist-version = "0.27"
