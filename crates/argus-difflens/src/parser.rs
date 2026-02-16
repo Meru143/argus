@@ -91,6 +91,19 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileDiff>, ArgusError> {
             continue;
         }
 
+        // Implicitly start a file if we see a header but have no current file
+        // This handles standard patches that lack the "diff --git" command line
+        if line.starts_with("--- ") && current.is_none() {
+            current = Some(FileDiff {
+                old_path: PathBuf::new(),
+                new_path: PathBuf::new(),
+                hunks: Vec::new(),
+                is_new_file: false,
+                is_deleted_file: false,
+                is_rename: false,
+            });
+        }
+
         let Some(file) = current.as_mut() else {
             continue;
         };
