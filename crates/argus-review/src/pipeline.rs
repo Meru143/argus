@@ -281,7 +281,17 @@ impl ReviewPipeline {
         let diff_text = diffs_to_text(&kept_diffs);
         let total_tokens = estimate_tokens(&diff_text);
 
-        let system = prompt::build_system_prompt(&self.config, &self.rules);
+        // Fetch negative feedback examples
+        let negative_examples = if let Some(root) = repo_path {
+            match crate::feedback::FeedbackStore::open(root) {
+                Ok(store) => store.get_negative_examples().unwrap_or_default(),
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+
+        let system = prompt::build_system_prompt(&self.config, &self.rules, &negative_examples);
         let mut all_comments = Vec::new();
         let mut llm_calls: usize = 0;
         let mut file_groups: Vec<Vec<String>> = Vec::new();

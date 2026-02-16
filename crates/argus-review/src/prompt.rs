@@ -17,11 +17,15 @@ use serde::{Deserialize, Serialize};
 /// use argus_review::prompt::build_system_prompt;
 ///
 /// let config = ReviewConfig::default();
-/// let prompt = build_system_prompt(&config, &[]);
+/// let prompt = build_system_prompt(&config, &[], &[]);
 /// assert!(prompt.contains("Argus"));
 /// assert!(prompt.contains("Maximum 5 comments"));
 /// ```
-pub fn build_system_prompt(config: &ReviewConfig, rules: &[Rule]) -> String {
+pub fn build_system_prompt(
+    config: &ReviewConfig,
+    rules: &[Rule],
+    negative_examples: &[String],
+) -> String {
     let severity_note = if config.include_suggestions {
         "- suggestion: Improvement that doesn't affect correctness"
     } else {
@@ -85,6 +89,20 @@ pub fn build_system_prompt(config: &ReviewConfig, rules: &[Rule]) -> String {
                 "- [{}] {}: {}\n",
                 rule.severity, rule.name, rule.description
             ));
+        }
+    }
+
+    if !negative_examples.is_empty() {
+        prompt.push_str("\n\n## User Preferences / Negative Examples\n\n");
+        prompt.push_str("The user has explicitly rejected similar comments in the past. Do NOT report issues like these:\n\n");
+        for ex in negative_examples {
+            // Truncate long examples to avoid token bloat
+            let display_ex = if ex.len() > 200 {
+                format!("{}...", &ex[..200])
+            } else {
+                ex.clone()
+            };
+            prompt.push_str(&format!("- \"{}\"\n", display_ex));
         }
     }
 
@@ -547,7 +565,7 @@ mod tests {
     #[test]
     fn system_prompt_contains_key_instructions() {
         let config = ReviewConfig::default();
-        let prompt = build_system_prompt(&config, &[]);
+        let prompt = build_system_prompt(&config, &[], &[]);
         assert!(prompt.contains("CERTAIN"));
         assert!(prompt.contains("line number"));
         assert!(prompt.contains("comments"));
@@ -560,7 +578,7 @@ mod tests {
             max_comments: 10,
             ..ReviewConfig::default()
         };
-        let prompt = build_system_prompt(&config, &[]);
+        let prompt = build_system_prompt(&config, &[], &[]);
         assert!(prompt.contains("Maximum 10 comments"));
     }
 
@@ -570,7 +588,7 @@ mod tests {
             include_suggestions: true,
             ..ReviewConfig::default()
         };
-        let prompt = build_system_prompt(&config, &[]);
+        let prompt = build_system_prompt(&config, &[], &[]);
         // Should NOT contain the restriction about "ONLY include if explicitly enabled"
         assert!(!prompt.contains("ONLY include if explicitly enabled"));
     }
@@ -718,7 +736,7 @@ mod tests {
                 description: "Never use panic! in library code".into(),
             },
         ];
-        let prompt = build_system_prompt(&config, &rules);
+        let prompt = build_system_prompt(&config, &rules, &[]);
         assert!(prompt.contains("Project-Specific Rules"));
         assert!(prompt.contains("no-unwrap"));
         assert!(prompt.contains("no-panic"));
@@ -729,7 +747,7 @@ mod tests {
     #[test]
     fn system_prompt_no_rules_section_when_empty() {
         let config = ReviewConfig::default();
-        let prompt = build_system_prompt(&config, &[]);
+        let prompt = build_system_prompt(&config, &[], &[]);
         assert!(!prompt.contains("Project-Specific Rules"));
     }
 
@@ -753,7 +771,7 @@ mod tests {
                 description: "Check bugs".into(),
             },
         ];
-        let prompt = build_system_prompt(&config, &rules);
+        let prompt = build_system_prompt(&config, &rules, &[]);
         let bug_pos = prompt.find("critical-bug").unwrap();
         let warn_pos = prompt.find("warn-check").unwrap();
         let suggestion_pos = prompt.find("style-check").unwrap();
