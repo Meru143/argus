@@ -33,13 +33,17 @@ struct Cli {
     config: Option<PathBuf>,
 
     /// Output format
-    #[arg(long, global = true, default_value = "text",
-          long_help = "Output format for command results.\n\n\
+    #[arg(
+        long,
+        global = true,
+        default_value = "text",
+        long_help = "Output format for command results.\n\n\
                        Formats:\n  \
                          text      Human-readable tables and summaries (default)\n  \
                          json      Machine-readable JSON with camelCase keys\n  \
                          markdown  GitHub-flavored Markdown\n  \
-                         sarif     SARIF v2.1.0 (review subcommand only)")]
+                         sarif     SARIF v2.1.0 (review subcommand only)"
+    )]
     format: OutputFormat,
 
     /// Enable verbose output
@@ -82,10 +86,12 @@ enum Command {
         file: Option<PathBuf>,
     },
     /// Search the codebase semantically
-    #[command(long_about = "Search the codebase using hybrid semantic + keyword search.\n\n\
+    #[command(
+        long_about = "Search the codebase using hybrid semantic + keyword search.\n\n\
         Requires an embedding provider API key. Index the repo first with --index,\n\
         then search with a natural language query. Use --reindex for incremental updates.\n\n\
-        Examples:\n  argus search --index --path .\n  argus search 'error handling logic'\n  argus search 'auth middleware' --limit 5")]
+        Examples:\n  argus search --index --path .\n  argus search 'error handling logic'\n  argus search 'auth middleware' --limit 5"
+    )]
     Search {
         /// Search query (omit to just index or reindex)
         query: Option<String>,
@@ -107,10 +113,12 @@ enum Command {
         reindex: bool,
     },
     /// Analyze git history for hotspots, coupling, and ownership
-    #[command(long_about = "Analyze git history for hotspots, coupling, and ownership.\n\n\
+    #[command(
+        long_about = "Analyze git history for hotspots, coupling, and ownership.\n\n\
         Mines commit history using git2 to detect high-churn hotspots, temporal coupling\n\
         between files, knowledge silos, and project bus factor.\n\n\
-        Examples:\n  argus history --path .\n  argus history --analysis hotspots --since 90\n  argus history --analysis coupling --min-coupling 0.5")]
+        Examples:\n  argus history --path .\n  argus history --analysis hotspots --since 90\n  argus history --analysis coupling --min-coupling 0.5"
+    )]
     History {
         /// Repository path (default: current directory)
         #[arg(long, default_value = ".")]
@@ -140,16 +148,25 @@ enum Command {
         Examples:\n  git diff | argus review --repo .\n  argus review --pr owner/repo#123 --post-comments\n  argus review --file changes.patch --fail-on warning")]
     Review {
         /// GitHub PR to review (format: owner/repo#123)
-        #[arg(long, long_help = "GitHub PR to review.\n\nFormat: owner/repo#123\nRequires GITHUB_TOKEN or GH_TOKEN env var.")]
+        #[arg(
+            long,
+            long_help = "GitHub PR to review.\n\nFormat: owner/repo#123\nRequires GITHUB_TOKEN or GH_TOKEN env var."
+        )]
         pr: Option<String>,
         /// Read diff from file instead of stdin
         #[arg(long)]
         file: Option<PathBuf>,
         /// Post comments to GitHub PR
-        #[arg(long, long_help = "Post review comments directly to the GitHub PR.\n\nRequires --pr and GITHUB_TOKEN. Uses REQUEST_CHANGES event if any\nbug-level findings are present, otherwise COMMENT.")]
+        #[arg(
+            long,
+            long_help = "Post review comments directly to the GitHub PR.\n\nRequires --pr and GITHUB_TOKEN. Uses REQUEST_CHANGES event if any\nbug-level findings are present, otherwise COMMENT."
+        )]
         post_comments: bool,
         /// Repository path for codebase context
-        #[arg(long, long_help = "Repository path for codebase context.\n\nEnables repo map generation and git history analysis to provide\nthe LLM with richer context for more accurate reviews.")]
+        #[arg(
+            long,
+            long_help = "Repository path for codebase context.\n\nEnables repo map generation and git history analysis to provide\nthe LLM with richer context for more accurate reviews."
+        )]
         repo: Option<PathBuf>,
         /// Additional glob patterns to skip (e.g. "*.test.ts")
         #[arg(long)]
@@ -158,7 +175,10 @@ enum Command {
         #[arg(long)]
         include_suggestions: bool,
         /// Exit with non-zero code if findings meet severity threshold
-        #[arg(long, long_help = "Exit with non-zero code if findings of this severity or higher are found.\n\nSeverity ranking: bug > warning > suggestion > info.\nUseful in CI pipelines to fail builds on serious issues.")]
+        #[arg(
+            long,
+            long_help = "Exit with non-zero code if findings of this severity or higher are found.\n\nSeverity ranking: bug > warning > suggestion > info.\nUseful in CI pipelines to fail builds on serious issues."
+        )]
         fail_on: Option<Severity>,
         /// Show comments that were filtered out, with reasons
         #[arg(long)]
@@ -168,10 +188,12 @@ enum Command {
         apply_patches: bool,
     },
     /// Start the MCP server for IDE integration
-    #[command(long_about = "Start the MCP (Model Context Protocol) server for IDE integration.\n\n\
+    #[command(
+        long_about = "Start the MCP (Model Context Protocol) server for IDE integration.\n\n\
         Exposes argus tools over stdio transport for use by AI coding agents\n\
         and IDE extensions. Provides repo mapping, diff analysis, search, and review.\n\n\
-        Example:\n  argus mcp --path /my/project")]
+        Example:\n  argus mcp --path /my/project"
+    )]
     Mcp {
         /// Repository path (default: current directory)
         #[arg(long, default_value = ".")]
@@ -228,7 +250,9 @@ fn print_welcome(use_color: bool) {
 
         println!("Quick start:");
         println!("  \x1b[36margus init\x1b[0m                    Create a .argus.toml config file");
-        println!("  \x1b[36margus review --repo .\x1b[0m         Review your latest changes with AI");
+        println!(
+            "  \x1b[36margus review --repo .\x1b[0m         Review your latest changes with AI"
+        );
         println!("  \x1b[36margus map --path .\x1b[0m            Generate a ranked codebase map\n");
 
         println!("All commands:");
@@ -685,13 +709,11 @@ async fn main() -> Result<()> {
                 _ => "VOYAGE_API_KEY",
             };
             if config.embedding.api_key.is_none() && std::env::var(emb_env_var).is_err() {
-                miette::bail!(
-                    miette::miette!(
-                        help = "Set {emb_env_var} or add api_key in your .argus.toml under [embedding]",
-                        "No API key configured for embedding provider '{}'",
-                        config.embedding.provider
-                    )
-                );
+                miette::bail!(miette::miette!(
+                    help = "Set {emb_env_var} or add api_key in your .argus.toml under [embedding]",
+                    "No API key configured for embedding provider '{}'",
+                    config.embedding.provider
+                ));
             }
 
             let embedding_client =
@@ -791,13 +813,11 @@ async fn main() -> Result<()> {
 
             // Hint: not a git repository
             if !path.join(".git").exists() && git2::Repository::discover(path).is_err() {
-                miette::bail!(
-                    miette::miette!(
-                        help = "Run argus from inside a git repository, or specify --path to one",
-                        "Not a git repository: {}",
-                        path.display()
-                    )
-                );
+                miette::bail!(miette::miette!(
+                    help = "Run argus from inside a git repository, or specify --path to one",
+                    "Not a git repository: {}",
+                    path.display()
+                ));
             }
 
             let options = argus_gitpulse::mining::MiningOptions {
@@ -1021,12 +1041,10 @@ async fn main() -> Result<()> {
         }) => {
             // Hint: suggest `argus init` when no config file exists
             if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
-                miette::bail!(
-                    miette::miette!(
-                        help = "Run 'argus init' to create a default .argus.toml",
-                        "No configuration file found"
-                    )
-                );
+                miette::bail!(miette::miette!(
+                    help = "Run 'argus init' to create a default .argus.toml",
+                    "No configuration file found"
+                ));
             }
 
             let diff_input = if let Some(pr_ref) = pr {
@@ -1075,13 +1093,11 @@ async fn main() -> Result<()> {
                 _ => "OPENAI_API_KEY",
             };
             if config.llm.api_key.is_none() && std::env::var(llm_env_var).is_err() {
-                miette::bail!(
-                    miette::miette!(
-                        help = "Set {llm_env_var} or add api_key in your .argus.toml under [llm]",
-                        "No API key configured for LLM provider '{}'",
-                        config.llm.provider
-                    )
-                );
+                miette::bail!(miette::miette!(
+                    help = "Set {llm_env_var} or add api_key in your .argus.toml under [llm]",
+                    "No API key configured for LLM provider '{}'",
+                    config.llm.provider
+                ));
             }
 
             let llm_client = argus_review::llm::LlmClient::new(&config.llm)?;
