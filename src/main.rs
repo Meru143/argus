@@ -632,6 +632,22 @@ async fn main() -> Result<()> {
             }
             let index_path = path.join(".argus/index.db");
 
+            // Hint: missing embedding API key
+            let emb_env_var = match config.embedding.provider.as_str() {
+                "gemini" => "GEMINI_API_KEY",
+                "openai" => "OPENAI_API_KEY",
+                _ => "VOYAGE_API_KEY",
+            };
+            if config.embedding.api_key.is_none() && std::env::var(emb_env_var).is_err() {
+                miette::bail!(
+                    miette::miette!(
+                        help = "Set {emb_env_var} or add api_key in your .argus.toml under [embedding]",
+                        "No API key configured for embedding provider '{}'",
+                        config.embedding.provider
+                    )
+                );
+            }
+
             let embedding_client =
                 argus_codelens::embedding::EmbeddingClient::with_config(&config.embedding)?;
 
@@ -726,6 +742,18 @@ async fn main() -> Result<()> {
             if cli.format == OutputFormat::Sarif {
                 miette::bail!("SARIF output is only supported for the review subcommand.");
             }
+
+            // Hint: not a git repository
+            if !path.join(".git").exists() && git2::Repository::discover(path).is_err() {
+                miette::bail!(
+                    miette::miette!(
+                        help = "Run argus from inside a git repository, or specify --path to one",
+                        "Not a git repository: {}",
+                        path.display()
+                    )
+                );
+            }
+
             let options = argus_gitpulse::mining::MiningOptions {
                 since_days: since,
                 ..argus_gitpulse::mining::MiningOptions::default()
@@ -945,6 +973,16 @@ async fn main() -> Result<()> {
             show_filtered,
             apply_patches,
         }) => {
+            // Hint: suggest `argus init` when no config file exists
+            if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
+                miette::bail!(
+                    miette::miette!(
+                        help = "Run 'argus init' to create a default .argus.toml",
+                        "No configuration file found"
+                    )
+                );
+            }
+
             let diff_input = if let Some(pr_ref) = pr {
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
                 let github = argus_review::github::GitHubClient::new(None)?;
@@ -952,6 +990,16 @@ async fn main() -> Result<()> {
             } else {
                 read_diff_input(file)?
             };
+
+            // Hint: empty diff input from stdin
+            if diff_input.trim().is_empty() && pr.is_none() {
+                miette::bail!(
+                    miette::miette!(
+                        help = "Pipe a diff to argus, e.g.: git diff | argus review --repo .\n       Or use --file <path> or --pr owner/repo#123",
+                        "Empty diff input"
+                    )
+                );
+            }
 
             let diffs = argus_difflens::parser::parse_unified_diff(&diff_input)?;
 
@@ -972,6 +1020,22 @@ async fn main() -> Result<()> {
                         .severity_filter
                         .push(argus_core::Severity::Suggestion);
                 }
+            }
+
+            // Hint: missing API key — check before creating the LLM client
+            let llm_env_var = match config.llm.provider.as_str() {
+                "anthropic" => "ANTHROPIC_API_KEY",
+                "gemini" => "GEMINI_API_KEY",
+                _ => "OPENAI_API_KEY",
+            };
+            if config.llm.api_key.is_none() && std::env::var(llm_env_var).is_err() {
+                miette::bail!(
+                    miette::miette!(
+                        help = "Set {llm_env_var} or add api_key in your .argus.toml under [llm]",
+                        "No API key configured for LLM provider '{}'",
+                        config.llm.provider
+                    )
+                );
             }
 
             let llm_client = argus_review::llm::LlmClient::new(&config.llm)?;
