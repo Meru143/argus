@@ -21,13 +21,20 @@ jobs:
       - name: Install Argus
         run: cargo install argus-ai --locked
 
+      - name: Configure Argus
+        run: |
+          mkdir -p .argus
+          cat > .argus.toml << 'EOF'
+          [llm]
+          provider = "gemini"
+          EOF
+
       - name: Run Review
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           argus review \
-            --provider gemini \
             --diff origin/${{ github.base_ref }}..HEAD \
             --pr ${{ github.repository }}#${{ github.event.pull_request.number }} \
             --post-comments \
