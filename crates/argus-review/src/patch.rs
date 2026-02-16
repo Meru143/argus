@@ -220,11 +220,7 @@ mod tests {
     fn test_multiple_patches_same_file() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("multi.rs");
-        std::fs::write(
-            &file_path,
-            "line1\nline2\nline3\nline4\nline5\n",
-        )
-        .unwrap();
+        std::fs::write(&file_path, "line1\nline2\nline3\nline4\nline5\n").unwrap();
 
         let comments = vec![
             make_comment("multi.rs", 2, Some("patched2"), "fix line 2"),
