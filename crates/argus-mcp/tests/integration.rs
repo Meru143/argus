@@ -25,7 +25,7 @@ fn server_info_is_correct() {
     let info = server.get_info();
 
     assert_eq!(info.server_info.name, "argus");
-    assert_eq!(info.server_info.version, "0.2.0");
+    assert_eq!(info.server_info.version, "0.2.1");
     assert!(info.instructions.is_some());
     let instructions = info.instructions.unwrap();
     assert!(instructions.contains("analyze_diff"));

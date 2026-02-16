@@ -3,6 +3,7 @@
 > Your coding agent shouldn't grade its own homework.
 
 [![CI](https://github.com/Meru143/argus/actions/workflows/ci.yml/badge.svg)](https://github.com/Meru143/argus/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/argus-ai.svg)](https://crates.io/crates/argus-ai)
 [![npm version](https://img.shields.io/npm/v/argus-ai.svg)](https://www.npmjs.com/package/argus-ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
