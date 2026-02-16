@@ -74,6 +74,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[[bin]]
+name = "argus"
+path = "src/main.rs"
+
 [dependencies]
 argus-core = { workspace = true }
 argus-repomap = { workspace = true }
