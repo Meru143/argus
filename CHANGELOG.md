@@ -2,6 +2,24 @@
 
 All notable changes to Argus are documented here.
 
+## [0.3.0](https://github.com/Meru143/argus/compare/argus-ai-v0.2.2...argus-ai-v0.3.0) - 2026-02-16
+
+### Added
+
+- implement learning from feedback (argus feedback)
+- add PHP, Kotlin, Swift tree-sitter support (9→12 languages)
+- implement incremental review (--incremental)
+- add PR description generation (argus describe)
+- self-reflection FP filtering, indicatif progress bars, 4 new languages ([#2](https://github.com/Meru143/argus/pull/2))
+
+### Fixed
+
+- configure gemini provider via .argus.toml instead of --provider flag
+
+### Other
+
+- add release-plz workflow for auto-publishing
+
 ## [0.2.2] — 2026-02-16
 
 ### Added
