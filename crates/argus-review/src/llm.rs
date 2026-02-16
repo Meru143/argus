@@ -456,10 +456,7 @@ impl LlmClient {
     }
 
     async fn chat_ollama(&self, messages: Vec<ChatMessage>) -> Result<String, ArgusError> {
-        let base_url = self
-            .base_url
-            .as_deref()
-            .unwrap_or("http://localhost:11434");
+        let base_url = self.base_url.as_deref().unwrap_or("http://localhost:11434");
         let url = format!("{base_url}/api/chat");
 
         let body = serde_json::json!({
