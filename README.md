@@ -65,6 +65,17 @@ git diff main | argus review --repo .
 argus review --pr owner/repo#42 --post-comments
 ```
 
+### `describe` — PR Descriptions
+Generate structured, conventional-commit PR descriptions from your changes.
+
+```bash
+# Generate description for staged changes
+argus describe
+
+# Generate for a specific PR
+argus describe --pr owner/repo#42
+```
+
 ### `map` — Codebase Structure
 Generate a ranked map of your codebase structure (tree-sitter + PageRank).
 
@@ -182,6 +193,17 @@ Run `argus init` to generate a `.argus.toml`:
 # skip_patterns = ["*.lock", "*.min.js", "vendor/**"]
 ```
 
+## Custom Rules
+
+Argus supports natural language custom rules. Create a file at `.argus/rules.md` (or `.argus/rules/**/*.md`) to guide the AI reviewer.
+
+**Example `.argus/rules.md`:**
+```markdown
+- Always suggest using `anyhow::Result` instead of `Result<T, Box<dyn Error>>`.
+- Flag usage of `unwrap()` in production code; suggest `expect()` or error handling.
+- Ensure all public functions have doc comments.
+```
+
 ### LLM Providers
 
 | Provider | Config | Model | Env Variable |
@@ -189,6 +211,7 @@ Run `argus init` to generate a `.argus.toml`:
 | Gemini | `provider = "gemini"` | `gemini-2.0-flash` | `GEMINI_API_KEY` |
 | OpenAI | `provider = "openai"` | `gpt-4o` | `OPENAI_API_KEY` |
 | Anthropic | `provider = "anthropic"` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
+| Ollama | `provider = "ollama"` | `llama3` | (None) |
 
 ### Embedding Providers
 
