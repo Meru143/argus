@@ -1,4 +1,4 @@
-# Argus — AI Code Review Platform
+# Argus
 
 > Your coding agent shouldn't grade its own homework.
 
@@ -6,6 +6,7 @@
 [![crates.io](https://img.shields.io/crates/v/argus-ai.svg)](https://crates.io/crates/argus-ai)
 [![npm version](https://img.shields.io/npm/v/argus-ai.svg)](https://www.npmjs.com/package/argus-ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/Meru143/argus)](https://github.com/Meru143/argus)
 
 Argus is a local-first, modular AI code review platform. One binary, six tools, zero lock-in. It combines structural analysis, semantic search, git history intelligence, and LLM-powered reviews to catch what your copilot misses.
 
@@ -172,30 +173,50 @@ Add to generic MCP settings:
 
 ## Configuration
 
-Run `argus init` to generate a `.argus.toml`.
-
-<details>
-<summary><strong>Full Configuration Example</strong></summary>
+Run `argus init` to generate a `.argus.toml`:
 
 ```toml
 [review]
-max_comments = 5
-min_confidence = 90
-include_suggestions = false
+# max_comments = 5
+# min_confidence = 90
+# skip_patterns = ["*.lock", "*.min.js", "vendor/**"]
+```
 
-# Gemini (Zero Cost)
+### LLM Providers
+
+| Provider | Config | Model | Env Variable |
+|----------|--------|-------|-------------|
+| Gemini | `provider = "gemini"` | `gemini-2.0-flash` | `GEMINI_API_KEY` |
+| OpenAI | `provider = "openai"` | `gpt-4o` | `OPENAI_API_KEY` |
+| Anthropic | `provider = "anthropic"` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
+
+### Embedding Providers
+
+| Provider | Config | Model | Env Variable |
+|----------|--------|-------|-------------|
+| Gemini | `provider = "gemini"` | `text-embedding-004` | `GEMINI_API_KEY` |
+| Voyage | `provider = "voyage"` | `voyage-code-3` | `VOYAGE_API_KEY` |
+| OpenAI | `provider = "openai"` | `text-embedding-3-small` | `OPENAI_API_KEY` |
+
+**Zero-cost setup:** Use Gemini for both LLM and embeddings with a [free API key](https://aistudio.google.com/apikey).
+
+```toml
 [llm]
 provider = "gemini"
-model = "gemini-2.0-flash"
 
 [embedding]
 provider = "gemini"
-model = "text-embedding-004"
-
-# Environment Variables:
-# GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, VOYAGE_API_KEY
 ```
-</details>
+
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `GEMINI_API_KEY` | Gemini LLM + embeddings |
+| `OPENAI_API_KEY` | OpenAI LLM + embeddings |
+| `ANTHROPIC_API_KEY` | Anthropic LLM |
+| `VOYAGE_API_KEY` | Voyage embeddings |
+| `GITHUB_TOKEN` | GitHub PR integration |
 
 ## Architecture
 
@@ -215,6 +236,17 @@ model = "text-embedding-004"
 ┌─────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐
 │ repomap │ │difflens │ │ codelens │ │ gitpulse │
 └─────────┘ └─────────┘ └──────────┘ └──────────┘
+```
+
+**Crate dependency order:**
+```
+core (no internal deps)
+  ├── repomap (core)
+  ├── difflens (core)
+  ├── gitpulse (core)
+  ├── codelens (core, repomap)
+  └── review (core, repomap, difflens, codelens, gitpulse)
+        └── mcp (core, review)
 ```
 
 ## Contributing
