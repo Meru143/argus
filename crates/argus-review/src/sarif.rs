@@ -30,6 +30,7 @@ use crate::pipeline::ReviewResult;
 ///         model_used: "gpt-4o".into(),
 ///         llm_calls: 0,
 ///         file_groups: vec![],
+///         hotspot_files: 0,
 ///     },
 /// };
 /// let sarif = to_sarif(&result);
@@ -175,6 +176,7 @@ mod tests {
                 model_used: "test".into(),
                 llm_calls: 1,
                 file_groups: vec![],
+                hotspot_files: 0,
             },
         }
     }
