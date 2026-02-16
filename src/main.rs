@@ -14,7 +14,15 @@ use argus_core::{OutputFormat, Severity};
     about = "AI-powered code review platform",
     long_about = "Argus validates AI-generated code — your coding agent shouldn't grade its own homework.\n\n\
                    Composable subcommands for codebase mapping, diff analysis, semantic search,\n\
-                   git history intelligence, AI reviews, and MCP server integration."
+                   git history intelligence, AI reviews, and MCP server integration.\n\n\
+                   Examples:\n  \
+                     argus review --repo .           Review staged changes with AI\n  \
+                     git diff main | argus review    Review a diff from stdin\n  \
+                     argus review --pr owner/repo#1  Review a GitHub pull request\n  \
+                     argus map --path .              Generate a ranked codebase map\n  \
+                     argus search 'auth logic' --index  Semantic search with indexing\n  \
+                     argus history --analysis hotspots  Find high-churn hotspots\n  \
+                     argus doctor                    Check setup and environment"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -25,7 +33,13 @@ struct Cli {
     config: Option<PathBuf>,
 
     /// Output format
-    #[arg(long, global = true, default_value = "text")]
+    #[arg(long, global = true, default_value = "text",
+          long_help = "Output format for command results.\n\n\
+                       Formats:\n  \
+                         text      Human-readable tables and summaries (default)\n  \
+                         json      Machine-readable JSON with camelCase keys\n  \
+                         markdown  GitHub-flavored Markdown\n  \
+                         sarif     SARIF v2.1.0 (review subcommand only)")]
     format: OutputFormat,
 
     /// Enable verbose output
@@ -40,6 +54,10 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Generate a ranked map of the codebase structure
+    #[command(long_about = "Generate a ranked map of the codebase structure.\n\n\
+        Uses tree-sitter to parse source files and PageRank to rank symbols by importance.\n\
+        Output is a token-budgeted summary suitable for LLM context windows.\n\n\
+        Examples:\n  argus map --path .\n  argus map --max-tokens 2048 --focus src/main.rs")]
     Map {
         /// Repository path (default: current directory)
         #[arg(long, default_value = ".")]
@@ -54,12 +72,20 @@ enum Command {
         focus: Vec<PathBuf>,
     },
     /// Analyze diffs and compute risk scores
+    #[command(long_about = "Analyze diffs and compute risk scores.\n\n\
+        Parses unified diffs and scores risk based on file count, complexity delta,\n\
+        and file types. Reads from stdin or a file.\n\n\
+        Examples:\n  git diff | argus diff\n  argus diff --file changes.patch")]
     Diff {
         /// Read diff from file instead of stdin
         #[arg(long)]
         file: Option<PathBuf>,
     },
     /// Search the codebase semantically
+    #[command(long_about = "Search the codebase using hybrid semantic + keyword search.\n\n\
+        Requires an embedding provider API key. Index the repo first with --index,\n\
+        then search with a natural language query. Use --reindex for incremental updates.\n\n\
+        Examples:\n  argus search --index --path .\n  argus search 'error handling logic'\n  argus search 'auth middleware' --limit 5")]
     Search {
         /// Search query (omit to just index or reindex)
         query: Option<String>,
@@ -81,6 +107,10 @@ enum Command {
         reindex: bool,
     },
     /// Analyze git history for hotspots, coupling, and ownership
+    #[command(long_about = "Analyze git history for hotspots, coupling, and ownership.\n\n\
+        Mines commit history using git2 to detect high-churn hotspots, temporal coupling\n\
+        between files, knowledge silos, and project bus factor.\n\n\
+        Examples:\n  argus history --path .\n  argus history --analysis hotspots --since 90\n  argus history --analysis coupling --min-coupling 0.5")]
     History {
         /// Repository path (default: current directory)
         #[arg(long, default_value = ".")]
@@ -103,18 +133,23 @@ enum Command {
         min_coupling: f64,
     },
     /// Run an AI-powered code review
+    #[command(long_about = "Run an AI-powered code review.\n\n\
+        Accepts diffs from stdin, a file, or a GitHub PR. Combines diff analysis with\n\
+        codebase context (repo map, git history) for behaviorally-informed reviews.\n\
+        Supports cross-file analysis, custom rules, and SARIF output.\n\n\
+        Examples:\n  git diff | argus review --repo .\n  argus review --pr owner/repo#123 --post-comments\n  argus review --file changes.patch --fail-on warning")]
     Review {
         /// GitHub PR to review (format: owner/repo#123)
-        #[arg(long)]
+        #[arg(long, long_help = "GitHub PR to review.\n\nFormat: owner/repo#123\nRequires GITHUB_TOKEN or GH_TOKEN env var.")]
         pr: Option<String>,
         /// Read diff from file instead of stdin
         #[arg(long)]
         file: Option<PathBuf>,
         /// Post comments to GitHub PR
-        #[arg(long)]
+        #[arg(long, long_help = "Post review comments directly to the GitHub PR.\n\nRequires --pr and GITHUB_TOKEN. Uses REQUEST_CHANGES event if any\nbug-level findings are present, otherwise COMMENT.")]
         post_comments: bool,
-        /// Repository path for codebase context (enables repo map)
-        #[arg(long)]
+        /// Repository path for codebase context
+        #[arg(long, long_help = "Repository path for codebase context.\n\nEnables repo map generation and git history analysis to provide\nthe LLM with richer context for more accurate reviews.")]
         repo: Option<PathBuf>,
         /// Additional glob patterns to skip (e.g. "*.test.ts")
         #[arg(long)]
@@ -122,8 +157,8 @@ enum Command {
         /// Include suggestion-level comments (default: only bug+warning)
         #[arg(long)]
         include_suggestions: bool,
-        /// Exit with non-zero code if findings of this severity or higher are found
-        #[arg(long)]
+        /// Exit with non-zero code if findings meet severity threshold
+        #[arg(long, long_help = "Exit with non-zero code if findings of this severity or higher are found.\n\nSeverity ranking: bug > warning > suggestion > info.\nUseful in CI pipelines to fail builds on serious issues.")]
         fail_on: Option<Severity>,
         /// Show comments that were filtered out, with reasons
         #[arg(long)]
@@ -133,14 +168,25 @@ enum Command {
         apply_patches: bool,
     },
     /// Start the MCP server for IDE integration
+    #[command(long_about = "Start the MCP (Model Context Protocol) server for IDE integration.\n\n\
+        Exposes argus tools over stdio transport for use by AI coding agents\n\
+        and IDE extensions. Provides repo mapping, diff analysis, search, and review.\n\n\
+        Example:\n  argus mcp --path /my/project")]
     Mcp {
         /// Repository path (default: current directory)
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
     /// Create a default .argus.toml configuration file
+    #[command(long_about = "Create a default .argus.toml configuration file.\n\n\
+        Generates a commented-out template with all available options.\n\
+        Fails if .argus.toml already exists.")]
     Init,
     /// Check your Argus setup and environment
+    #[command(long_about = "Check your Argus setup and environment.\n\n\
+        Runs diagnostics for git repo, config file, LLM/embedding API keys,\n\
+        search index, GitHub token, and git history. Use --format json for\n\
+        machine-readable output.")]
     Doctor,
     /// Generate shell completion scripts
     #[command(hide = true)]
