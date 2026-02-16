@@ -56,10 +56,14 @@ pub fn build_system_prompt(config: &ReviewConfig, rules: &[Rule]) -> String {
                \"severity\": \"bug\",\n\
                \"message\": \"Concrete explanation with scenario\",\n\
                \"confidence\": 95,\n\
-               \"suggestion\": \"Optional concrete fix\"\n\
+               \"suggestion\": \"Optional concrete fix\",\n\
+               \"patch\": \"fn example() {{\\n    // corrected code here\\n}}\"\n\
              }}\n\
            ]\n\
          }}\n\
+         \n\
+         For each comment, if you can suggest a concrete fix, include a \"patch\" field with the corrected code snippet. \
+         Only include the fixed lines, not the entire file. If you cannot suggest a fix, omit the field.\n\
          \n\
          If you find no issues worth reporting, return: {{\"comments\": []}}",
         max_comments = config.max_comments,
@@ -161,6 +165,7 @@ struct LlmComment {
     message: String,
     confidence: Option<serde_json::Value>,
     suggestion: Option<String>,
+    patch: Option<String>,
 }
 
 /// Parse the LLM JSON response into validated [`ReviewComment`] entries.
@@ -224,6 +229,7 @@ pub fn parse_review_response(response: &str) -> Result<Vec<ReviewComment>, Argus
             message: c.message.clone(),
             confidence,
             suggestion: c.suggestion.clone(),
+            patch: c.patch.clone(),
             rule: None,
         });
     }
@@ -266,6 +272,7 @@ fn strip_code_fences(s: &str) -> &str {
 ///     message: "Null dereference".into(),
 ///     confidence: 95.0,
 ///     suggestion: None,
+///     patch: None,
 ///     rule: None,
 /// }];
 /// let prompt = build_summary_prompt(&comments, "+added line");
@@ -522,6 +529,7 @@ mod tests {
                 message: "Null pointer dereference".into(),
                 confidence: 95.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
             ReviewComment {
@@ -531,6 +539,7 @@ mod tests {
                 message: "SQL injection risk".into(),
                 confidence: 88.0,
                 suggestion: None,
+                patch: None,
                 rule: None,
             },
         ];
@@ -540,5 +549,36 @@ mod tests {
         assert!(prompt.contains("src/auth.rs"));
         assert!(prompt.contains("+added line"));
         assert!(prompt.contains("risk level"));
+    }
+
+    #[test]
+    fn parse_response_with_patch() {
+        let json = r#"{"comments": [{
+            "file": "src/auth.rs",
+            "line": 42,
+            "severity": "bug",
+            "message": "Null dereference",
+            "confidence": 95,
+            "suggestion": "Add a check",
+            "patch": "if let Some(val) = maybe_val {\n    use(val);\n}"
+        }]}"#;
+        let comments = parse_review_response(json).unwrap();
+        assert_eq!(comments.len(), 1);
+        assert!(comments[0].patch.is_some());
+        assert!(comments[0].patch.as_ref().unwrap().contains("Some(val)"));
+    }
+
+    #[test]
+    fn parse_response_without_patch() {
+        let json = r#"{"comments": [{
+            "file": "src/auth.rs",
+            "line": 42,
+            "severity": "bug",
+            "message": "Null dereference",
+            "confidence": 95
+        }]}"#;
+        let comments = parse_review_response(json).unwrap();
+        assert_eq!(comments.len(), 1);
+        assert!(comments[0].patch.is_none());
     }
 }
