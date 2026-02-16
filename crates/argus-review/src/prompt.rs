@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use argus_core::{ArgusError, ReviewComment, ReviewConfig, Rule, Severity};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Build the system prompt for the code review LLM.
 ///
@@ -387,6 +387,108 @@ pub fn parse_self_reflection_response(
     }
 
     Ok(results)
+}
+
+/// Build the system prompt for PR description generation.
+///
+/// Instructs the LLM to generate a title, description, and labels from a diff.
+///
+/// # Examples
+///
+/// ```
+/// use argus_review::prompt::build_describe_system_prompt;
+///
+/// let prompt = build_describe_system_prompt();
+/// assert!(prompt.contains("pull request descriptions"));
+/// ```
+pub fn build_describe_system_prompt() -> String {
+    "You are Argus, an expert at writing clear, informative pull request descriptions from code diffs.\n\
+     \n\
+     RULES — FOLLOW STRICTLY:\n\
+     1. Read the diff carefully and understand what changed.\n\
+     2. Generate a concise PR title (max 72 chars) using conventional commit format when appropriate (feat:, fix:, refactor:, docs:, chore:, etc.).\n\
+     3. Write a description with:\n\
+        - A one-sentence summary of what the PR does\n\
+        - A bullet list of key changes\n\
+        - Any notable considerations (breaking changes, migration needed, etc.)\n\
+     4. Suggest 1-4 labels from common categories: bug, feature, refactor, docs, tests, ci, performance, security, breaking-change, dependencies.\n\
+     5. Only suggest labels that genuinely apply.\n\
+     \n\
+     Respond with a JSON object. No markdown fences, no explanation outside JSON:\n\
+     {\n\
+       \"title\": \"feat: add user authentication\",\n\
+       \"description\": \"Adds JWT-based authentication...\\n\\n## Changes\\n- Added auth middleware\\n- ...\",\n\
+       \"labels\": [\"feature\", \"security\"]\n\
+     }\n\
+     \n\
+     Keep the description professional and informative. Use markdown in the description field."
+        .into()
+}
+
+/// Build the user prompt for PR description generation.
+///
+/// # Examples
+///
+/// ```
+/// use argus_review::prompt::build_describe_prompt;
+///
+/// let prompt = build_describe_prompt("+new line", None, None);
+/// assert!(prompt.contains("+new line"));
+/// ```
+pub fn build_describe_prompt(
+    diff: &str,
+    repo_map: Option<&str>,
+    history_context: Option<&str>,
+) -> String {
+    let mut prompt = String::new();
+
+    if let Some(map) = repo_map {
+        prompt.push_str("Here is the codebase structure for context:\n\n```\n");
+        prompt.push_str(map);
+        prompt.push_str("```\n\n");
+    }
+
+    if let Some(history) = history_context {
+        prompt.push_str("## Git History Context\n");
+        prompt.push_str(history);
+        prompt.push_str("\n\n");
+    }
+
+    prompt.push_str(&format!(
+        "Generate a PR title, description, and labels for the following changes:\n\n```diff\n{diff}\n```\n"
+    ));
+    prompt
+}
+
+/// A generated PR description.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrDescription {
+    /// Suggested PR title.
+    pub title: String,
+    /// Suggested PR description body (markdown).
+    pub description: String,
+    /// Suggested labels.
+    pub labels: Vec<String>,
+}
+
+/// Parse the LLM response for PR description generation.
+///
+/// # Examples
+///
+/// ```
+/// use argus_review::prompt::parse_describe_response;
+///
+/// let json = r#"{"title":"fix: typo","description":"Fixes a typo.","labels":["docs"]}"#;
+/// let desc = parse_describe_response(json).unwrap();
+/// assert_eq!(desc.title, "fix: typo");
+/// ```
+pub fn parse_describe_response(response: &str) -> Result<PrDescription, ArgusError> {
+    let cleaned = strip_code_fences(response);
+
+    let parsed: PrDescription = serde_json::from_str(cleaned)
+        .map_err(|e| ArgusError::Llm(format!("failed to parse PR description response: {e}")))?;
+
+    Ok(parsed)
 }
 
 /// Build a prompt asking the LLM to summarize the review findings.
@@ -801,5 +903,57 @@ mod tests {
         let fenced = "```json\n{\"evaluations\":[]}\n```";
         let evals = parse_self_reflection_response(fenced).unwrap();
         assert!(evals.is_empty());
+    }
+
+    #[test]
+    fn describe_system_prompt_contains_key_instructions() {
+        let prompt = build_describe_system_prompt();
+        assert!(prompt.contains("pull request descriptions"));
+        assert!(prompt.contains("title"));
+        assert!(prompt.contains("labels"));
+        assert!(prompt.contains("conventional commit"));
+    }
+
+    #[test]
+    fn describe_prompt_includes_diff() {
+        let prompt = build_describe_prompt("+added line", None, None);
+        assert!(prompt.contains("+added line"));
+        assert!(prompt.contains("```diff"));
+    }
+
+    #[test]
+    fn describe_prompt_includes_repo_map() {
+        let prompt = build_describe_prompt("+x", Some("src/main.rs\n  fn main()"), None);
+        assert!(prompt.contains("src/main.rs"));
+        assert!(prompt.contains("codebase structure"));
+    }
+
+    #[test]
+    fn describe_prompt_includes_history() {
+        let prompt = build_describe_prompt("+x", None, Some("- src/auth.rs: HOTSPOT"));
+        assert!(prompt.contains("HOTSPOT"));
+        assert!(prompt.contains("Git History Context"));
+    }
+
+    #[test]
+    fn parse_describe_response_valid() {
+        let json = r#"{"title":"feat: add auth","description":"Adds authentication.\n\n- JWT tokens\n- Middleware","labels":["feature","security"]}"#;
+        let desc = parse_describe_response(json).unwrap();
+        assert_eq!(desc.title, "feat: add auth");
+        assert!(desc.description.contains("JWT tokens"));
+        assert_eq!(desc.labels, vec!["feature", "security"]);
+    }
+
+    #[test]
+    fn parse_describe_response_with_fences() {
+        let json = "```json\n{\"title\":\"fix: typo\",\"description\":\"Fix.\",\"labels\":[]}\n```";
+        let desc = parse_describe_response(json).unwrap();
+        assert_eq!(desc.title, "fix: typo");
+    }
+
+    #[test]
+    fn parse_describe_response_malformed() {
+        let result = parse_describe_response("not json");
+        assert!(result.is_err());
     }
 }
