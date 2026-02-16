@@ -30,6 +30,7 @@ use crate::prompt;
 ///         comments_generated: 0,
 ///         comments_filtered: 0,
 ///         comments_deduplicated: 0,
+///         comments_reflected_out: 0,
 ///         skipped_files: vec![],
 ///         model_used: "gpt-4o".into(),
 ///         llm_calls: 0,
@@ -100,6 +101,7 @@ pub struct FilteredComment {
 ///     comments_generated: 10,
 ///     comments_filtered: 7,
 ///     comments_deduplicated: 1,
+///     comments_reflected_out: 2,
 ///     skipped_files: vec![],
 ///     model_used: "gpt-4o".into(),
 ///     llm_calls: 2,
@@ -122,6 +124,8 @@ pub struct ReviewStats {
     pub comments_filtered: usize,
     /// Duplicate comments merged.
     pub comments_deduplicated: usize,
+    /// Comments removed by self-reflection pass.
+    pub comments_reflected_out: usize,
     /// Files that were skipped with reasons.
     #[serde(skip)]
     pub skipped_files: Vec<SkippedFile>,
@@ -191,6 +195,7 @@ impl ReviewPipeline {
                     comments_generated: 0,
                     comments_filtered: 0,
                     comments_deduplicated: 0,
+                    comments_reflected_out: 0,
                     skipped_files,
                     model_used: self.llm.model().to_string(),
                     llm_calls: 0,
@@ -365,16 +370,38 @@ impl ReviewPipeline {
         // 3. Deduplicate
         let (deduped, comments_deduplicated) = deduplicate(all_comments);
 
+        // 3.5. Self-reflection pass: filter false positives
+        let (reflected, comments_reflected_out) =
+            if self.config.self_reflection && !deduped.is_empty() {
+                let is_tty = std::io::stderr().is_terminal();
+                if is_tty {
+                    eprintln!("Self-reflecting on {} comments...", deduped.len());
+                }
+                match self
+                    .self_reflect(&deduped, &diff_text, &mut llm_calls)
+                    .await
+                {
+                    Ok((kept, removed_count)) => (kept, removed_count),
+                    Err(e) => {
+                        eprintln!("warning: self-reflection failed ({e}), keeping all comments");
+                        (deduped, 0)
+                    }
+                }
+            } else {
+                (deduped, 0)
+            };
+
         // 4. Filter and sort
-        let (final_comments, filtered_comments) = filter_and_sort(deduped, &self.config);
+        let (final_comments, filtered_comments) = filter_and_sort(reflected, &self.config);
         let comments_filtered = filtered_comments.len();
 
         if std::io::stderr().is_terminal() {
             eprintln!(
-                "Done. {} comments ({} filtered, {} deduped)",
+                "Done. {} comments ({} filtered, {} deduped, {} reflected out)",
                 final_comments.len(),
                 comments_filtered,
                 comments_deduplicated,
+                comments_reflected_out,
             );
         }
 
@@ -416,12 +443,71 @@ impl ReviewPipeline {
                 comments_generated,
                 comments_filtered,
                 comments_deduplicated,
+                comments_reflected_out,
                 skipped_files,
                 model_used: self.llm.model().to_string(),
                 llm_calls,
                 file_groups,
             },
         })
+    }
+
+    /// Run self-reflection on the generated comments.
+    ///
+    /// Sends the comments and diff to the LLM for a second evaluation pass.
+    /// Comments scoring below `self_reflection_score_threshold` are removed.
+    /// Returns the surviving comments and the count of removed ones.
+    async fn self_reflect(
+        &self,
+        comments: &[ReviewComment],
+        diff_text: &str,
+        llm_calls: &mut usize,
+    ) -> Result<(Vec<ReviewComment>, usize), ArgusError> {
+        let reflection_prompt = prompt::build_self_reflection_prompt(comments, diff_text);
+        let messages = vec![
+            ChatMessage {
+                role: Role::System,
+                content: "You are a senior code reviewer evaluating AI-generated review comments. \
+                          Be critical — only high-quality, verifiable issues should pass."
+                    .into(),
+            },
+            ChatMessage {
+                role: Role::User,
+                content: reflection_prompt,
+            },
+        ];
+
+        let response = self.llm.chat(messages).await?;
+        *llm_calls += 1;
+
+        let evaluations = prompt::parse_self_reflection_response(&response)?;
+
+        // Build a score map: index -> (score, optional revised severity)
+        let mut score_map: HashMap<usize, (u8, Option<Severity>)> = HashMap::new();
+        for (idx, score, revised_sev) in evaluations {
+            score_map.insert(idx, (score, revised_sev));
+        }
+
+        let threshold = self.config.self_reflection_score_threshold;
+        let mut kept = Vec::new();
+        let mut removed = 0usize;
+
+        for (i, mut comment) in comments.iter().cloned().enumerate() {
+            if let Some((score, revised_sev)) = score_map.get(&i) {
+                if *score < threshold {
+                    removed += 1;
+                    continue;
+                }
+                // Apply revised severity if provided
+                if let Some(sev) = revised_sev {
+                    comment.severity = *sev;
+                }
+            }
+            // If a comment wasn't evaluated (LLM missed it), keep it
+            kept.push(comment);
+        }
+
+        Ok((kept, removed))
     }
 }
 
@@ -789,7 +875,7 @@ impl fmt::Display for ReviewResult {
         writeln!(f, "==============")?;
         writeln!(
             f,
-            "Model: {} | Files: {} (skipped: {}) | Hunks: {} | Comments: {} (filtered: {}, deduped: {}) | LLM calls: {}\n",
+            "Model: {} | Files: {} (skipped: {}) | Hunks: {} | Comments: {} (filtered: {}, deduped: {}, reflected: {}) | LLM calls: {}\n",
             self.stats.model_used,
             self.stats.files_reviewed,
             self.stats.files_skipped,
@@ -797,6 +883,7 @@ impl fmt::Display for ReviewResult {
             self.comments.len(),
             self.stats.comments_filtered,
             self.stats.comments_deduplicated,
+            self.stats.comments_reflected_out,
             self.stats.llm_calls,
         )?;
 
@@ -876,6 +963,7 @@ impl ReviewResult {
     ///         comments_generated: 0,
     ///         comments_filtered: 0,
     ///         comments_deduplicated: 0,
+    ///         comments_reflected_out: 0,
     ///         skipped_files: vec![],
     ///         model_used: "gpt-4o".into(),
     ///         llm_calls: 0,
@@ -889,7 +977,7 @@ impl ReviewResult {
         let mut out = String::new();
         out.push_str("# Review Results\n\n");
         out.push_str(&format!(
-            "**Model:** {} | **Files:** {} (skipped: {}) | **Hunks:** {} | **Comments:** {} (filtered: {}, deduped: {}) | **LLM calls:** {}\n\n",
+            "**Model:** {} | **Files:** {} (skipped: {}) | **Hunks:** {} | **Comments:** {} (filtered: {}, deduped: {}, reflected: {}) | **LLM calls:** {}\n\n",
             self.stats.model_used,
             self.stats.files_reviewed,
             self.stats.files_skipped,
@@ -897,6 +985,7 @@ impl ReviewResult {
             self.comments.len(),
             self.stats.comments_filtered,
             self.stats.comments_deduplicated,
+            self.stats.comments_reflected_out,
             self.stats.llm_calls,
         ));
 
@@ -1141,6 +1230,7 @@ mod tests {
                 comments_generated: 1,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 1,
@@ -1368,6 +1458,7 @@ mod tests {
                 comments_generated: 1,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 2,
@@ -1391,6 +1482,7 @@ mod tests {
                 comments_generated: 0,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 0,
@@ -1423,6 +1515,7 @@ mod tests {
                 comments_generated: 1,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 2,
@@ -1455,6 +1548,7 @@ mod tests {
                 comments_generated: 1,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 1,
@@ -1489,6 +1583,7 @@ mod tests {
                 comments_generated: 1,
                 comments_filtered: 0,
                 comments_deduplicated: 0,
+                comments_reflected_out: 0,
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 1,
