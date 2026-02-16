@@ -17,6 +17,7 @@ use crate::pipeline::ReviewResult;
 /// let result = ReviewResult {
 ///     comments: vec![],
 ///     filtered_comments: vec![],
+///     summary: None,
 ///     stats: ReviewStats {
 ///         files_reviewed: 0,
 ///         files_skipped: 0,
@@ -141,6 +142,7 @@ mod tests {
         ReviewResult {
             comments,
             filtered_comments: vec![],
+            summary: None,
             stats: ReviewStats {
                 files_reviewed: 1,
                 files_skipped: 0,

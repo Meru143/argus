@@ -246,6 +246,54 @@ fn strip_code_fences(s: &str) -> &str {
     trimmed
 }
 
+/// Build a prompt asking the LLM to summarize the review findings.
+///
+/// Takes the final review comments and the original diff text, producing
+/// a prompt that asks for a 2-4 sentence summary covering risk level,
+/// key themes, and merge safety.
+///
+/// # Examples
+///
+/// ```
+/// use argus_core::{ReviewComment, Severity};
+/// use argus_review::prompt::build_summary_prompt;
+/// use std::path::PathBuf;
+///
+/// let comments = vec![ReviewComment {
+///     file_path: PathBuf::from("src/lib.rs"),
+///     line: 10,
+///     severity: Severity::Bug,
+///     message: "Null dereference".into(),
+///     confidence: 95.0,
+///     suggestion: None,
+///     rule: None,
+/// }];
+/// let prompt = build_summary_prompt(&comments, "+added line");
+/// assert!(prompt.contains("Null dereference"));
+/// ```
+pub fn build_summary_prompt(comments: &[ReviewComment], diff: &str) -> String {
+    use std::fmt::Write;
+
+    let mut prompt = String::from(
+        "Given these review findings and the diff, write a 2-4 sentence summary. \
+         Cover: overall risk level (low/medium/high/critical), key themes, \
+         and whether the change is safe to merge. Return plain text, no JSON.\n\n\
+         ## Review Findings\n\n",
+    );
+    for c in comments {
+        let _ = writeln!(
+            prompt,
+            "- [{severity}] {path}:{line}: {message}",
+            severity = c.severity,
+            path = c.file_path.display(),
+            line = c.line,
+            message = c.message,
+        );
+    }
+    let _ = write!(prompt, "\n## Diff\n\n```diff\n{diff}\n```");
+    prompt
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,5 +510,35 @@ mod tests {
             warn_pos < suggestion_pos,
             "warning should appear before suggestion"
         );
+    }
+
+    #[test]
+    fn summary_prompt_contains_comment_messages() {
+        let comments = vec![
+            ReviewComment {
+                file_path: PathBuf::from("src/auth.rs"),
+                line: 42,
+                severity: Severity::Bug,
+                message: "Null pointer dereference".into(),
+                confidence: 95.0,
+                suggestion: None,
+                rule: None,
+            },
+            ReviewComment {
+                file_path: PathBuf::from("src/db.rs"),
+                line: 10,
+                severity: Severity::Warning,
+                message: "SQL injection risk".into(),
+                confidence: 88.0,
+                suggestion: None,
+                rule: None,
+            },
+        ];
+        let prompt = build_summary_prompt(&comments, "+added line");
+        assert!(prompt.contains("Null pointer dereference"));
+        assert!(prompt.contains("SQL injection risk"));
+        assert!(prompt.contains("src/auth.rs"));
+        assert!(prompt.contains("+added line"));
+        assert!(prompt.contains("risk level"));
     }
 }
