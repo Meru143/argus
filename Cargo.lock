@@ -114,7 +114,7 @@ dependencies = [
 
 [[package]]
 name = "argus-ai"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "argus-codelens",
  "argus-core",
@@ -138,7 +138,7 @@ dependencies = [
 
 [[package]]
 name = "argus-codelens"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "argus-core",
  "argus-repomap",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "argus-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "miette",
  "serde",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "argus-difflens"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "argus-core",
  "glob",
@@ -175,7 +175,7 @@ dependencies = [
 
 [[package]]
 name = "argus-gitpulse"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "argus-core",
  "git2",
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "argus-mcp"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "argus-codelens",
  "argus-core",
@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "argus-repomap"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "argus-core",
  "ignore",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "argus-review"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "argus-codelens",
  "argus-core",
