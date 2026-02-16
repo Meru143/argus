@@ -22,6 +22,7 @@ use crate::prompt;
 /// let result = ReviewResult {
 ///     comments: vec![],
 ///     filtered_comments: vec![],
+///     summary: None,
 ///     stats: ReviewStats {
 ///         files_reviewed: 0,
 ///         files_skipped: 0,
@@ -45,6 +46,9 @@ pub struct ReviewResult {
     /// Comments that were removed by filtering, with reasons.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub filtered_comments: Vec<FilteredComment>,
+    /// High-level summary of the review findings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
     /// Statistics about the review run.
     pub stats: ReviewStats,
 }
@@ -178,6 +182,7 @@ impl ReviewPipeline {
             return Ok(ReviewResult {
                 comments: Vec::new(),
                 filtered_comments: Vec::new(),
+                summary: None,
                 stats: ReviewStats {
                     files_reviewed: 0,
                     files_skipped,
@@ -377,9 +382,37 @@ impl ReviewPipeline {
             );
         }
 
+        // 5. Generate summary if there are comments
+        let summary = if !final_comments.is_empty() {
+            let is_tty = std::io::stderr().is_terminal();
+            if is_tty {
+                eprintln!("Generating summary...");
+            }
+            let summary_messages = vec![
+                ChatMessage {
+                    role: Role::System,
+                    content: "You are a code review summarizer. Be concise.".into(),
+                },
+                ChatMessage {
+                    role: Role::User,
+                    content: prompt::build_summary_prompt(&final_comments, &diff_text),
+                },
+            ];
+            match self.llm.chat(summary_messages).await {
+                Ok(text) => {
+                    llm_calls += 1;
+                    Some(text.trim().to_string())
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
         Ok(ReviewResult {
             comments: final_comments,
             filtered_comments,
+            summary,
             stats: ReviewStats {
                 files_reviewed,
                 files_skipped,
@@ -774,6 +807,10 @@ impl fmt::Display for ReviewResult {
             self.stats.llm_calls,
         )?;
 
+        if let Some(summary) = &self.summary {
+            writeln!(f, "Summary: {summary}\n")?;
+        }
+
         if !self.stats.skipped_files.is_empty() {
             writeln!(f, "Skipped files:")?;
             for sf in &self.stats.skipped_files {
@@ -832,6 +869,7 @@ impl ReviewResult {
     /// let result = ReviewResult {
     ///     comments: vec![],
     ///     filtered_comments: vec![],
+    ///     summary: None,
     ///     stats: ReviewStats {
     ///         files_reviewed: 0,
     ///         files_skipped: 0,
@@ -862,6 +900,10 @@ impl ReviewResult {
             self.stats.comments_deduplicated,
             self.stats.llm_calls,
         ));
+
+        if let Some(summary) = &self.summary {
+            out.push_str(&format!("> {summary}\n\n"));
+        }
 
         if self.comments.is_empty() {
             out.push_str("No issues found.\n");
@@ -1083,6 +1125,7 @@ mod tests {
                 rule: None,
             }],
             filtered_comments: vec![],
+            summary: None,
             stats: ReviewStats {
                 files_reviewed: 1,
                 files_skipped: 0,
@@ -1288,5 +1331,90 @@ mod tests {
     fn common_directory_empty_input() {
         let result = common_directory(&[]);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn display_shows_summary_when_present() {
+        let result = ReviewResult {
+            comments: vec![ReviewComment {
+                file_path: PathBuf::from("test.rs"),
+                line: 5,
+                severity: Severity::Bug,
+                message: "test bug".into(),
+                confidence: 99.0,
+                suggestion: None,
+                rule: None,
+            }],
+            filtered_comments: vec![],
+            summary: Some("High risk. Key issue is a null dereference.".into()),
+            stats: ReviewStats {
+                files_reviewed: 1,
+                files_skipped: 0,
+                total_hunks: 1,
+                comments_generated: 1,
+                comments_filtered: 0,
+                comments_deduplicated: 0,
+                skipped_files: vec![],
+                model_used: "test".into(),
+                llm_calls: 2,
+                file_groups: vec![],
+            },
+        };
+        let text = format!("{result}");
+        assert!(text.contains("Summary: High risk. Key issue is a null dereference."));
+    }
+
+    #[test]
+    fn display_omits_summary_when_none() {
+        let result = ReviewResult {
+            comments: vec![],
+            filtered_comments: vec![],
+            summary: None,
+            stats: ReviewStats {
+                files_reviewed: 0,
+                files_skipped: 0,
+                total_hunks: 0,
+                comments_generated: 0,
+                comments_filtered: 0,
+                comments_deduplicated: 0,
+                skipped_files: vec![],
+                model_used: "test".into(),
+                llm_calls: 0,
+                file_groups: vec![],
+            },
+        };
+        let text = format!("{result}");
+        assert!(!text.contains("Summary:"));
+    }
+
+    #[test]
+    fn markdown_includes_summary_blockquote() {
+        let result = ReviewResult {
+            comments: vec![ReviewComment {
+                file_path: PathBuf::from("test.rs"),
+                line: 5,
+                severity: Severity::Bug,
+                message: "test bug".into(),
+                confidence: 99.0,
+                suggestion: None,
+                rule: None,
+            }],
+            filtered_comments: vec![],
+            summary: Some("Medium risk due to missing error handling.".into()),
+            stats: ReviewStats {
+                files_reviewed: 1,
+                files_skipped: 0,
+                total_hunks: 1,
+                comments_generated: 1,
+                comments_filtered: 0,
+                comments_deduplicated: 0,
+                skipped_files: vec![],
+                model_used: "test".into(),
+                llm_calls: 2,
+                file_groups: vec![],
+            },
+        };
+        let md = result.to_markdown();
+        assert!(md.contains("> Medium risk due to missing error handling."));
     }
 }
