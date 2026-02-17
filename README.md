@@ -1,296 +1,179 @@
 # Argus
 
-> Your coding agent shouldn't grade its own homework.
+> **Your coding agent shouldn't grade its own homework.**
 
 [![CI](https://github.com/Meru143/argus/actions/workflows/ci.yml/badge.svg)](https://github.com/Meru143/argus/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/argus-ai.svg)](https://crates.io/crates/argus-ai)
 [![npm version](https://img.shields.io/npm/v/argus-ai.svg)](https://www.npmjs.com/package/argus-ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub stars](https://img.shields.io/github/stars/Meru143/argus)](https://github.com/Meru143/argus)
 
-Argus is a local-first, modular AI code review platform. One binary, six tools, zero lock-in. It combines structural analysis, semantic search, git history intelligence, and LLM-powered reviews to catch what your copilot misses.
+**Argus** is a local-first, modular AI code review platform. It combines structural analysis, semantic search, git history intelligence, and LLM-powered reviews to catch what your copilot misses.
 
-## Why Argus?
+---
 
-- **Independent review** — your AI agent wrote the code, a different AI reviews it. No self-grading.
-- **Full codebase context** — reviews use structural maps, semantic search, git history, and cross-file analysis. Not just the diff.
-- **Zero lock-in** — works with OpenAI, Anthropic, or Gemini. Switch providers in one line. **Gemini free tier = zero cost.**
-- **One binary, six tools** — map, diff, search, history, review, MCP server. Composable Unix-style subcommands.
+## ⚡️ The "Aha!" Moment
 
-## Get Started in 60 Seconds
+Most AI coding tools just generate code. Argus **audits** it.
 
-```bash
-# 1. Install via npm
-npx argus-ai init          # creates .argus.toml
+```text
+$ argus review --repo .
 
-# 2. Set your key (Gemini, Anthropic, or OpenAI)
-export GEMINI_API_KEY="your-key"
+🔍 Analyzing 3 files...
+  ├── src/auth.rs (Modified)
+  ├── src/user.rs (Modified)
+  └── src/main.rs (Context)
 
-# 3. Review your changes
-git diff HEAD~1 | npx argus-ai review --repo .
+⚠️  HIGH RISK DETECTED in src/auth.rs
+    • Hotspot: Top 5% most churned file
+    • Bus Factor: Only 1 developer has touched this in 6 months
+
+[src/auth.rs:42] Security Warning
+> unsafe { verify_token(token) }
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  "This `unsafe` block bypasses signature verification if the token is malformed.
+   Use `verify_token_safe` instead, or wrap in a proper `Result` check."
+
+✨ Suggestion:
+- unsafe { verify_token(token) }
++ verify_token_safe(token)?
 ```
 
-## Install
+---
 
-### Homebrew (macOS/Linux)
+## 🚀 Why Argus?
 
+| Feature | Argus | GitHub Copilot | Linters (Clippy/ESLint) |
+| :--- | :---: | :---: | :---: |
+| **Review Context** | **Deep** (Map + History + Search) | Shallow (Diff only) | None (Syntax only) |
+| **Feedback Loop** | ✅ **Learns your style** | ❌ Static | ❌ Static |
+| **Self-Correction** | ✅ **Validation Step** | ❌ Generates & forgets | N/A |
+| **Privacy** | ✅ **Local / Zero-Retention** | ⚠️ Cloud-based | ✅ Local |
+| **Cost** | 💸 **Free Tier (Gemini)** | 💰 Monthly Sub | 💸 Free |
+
+### New in v0.4.0
+- **Feedback Loop:** `argus feedback` lets you rate comments. Argus learns to stop nagging about style and focus on bugs.
+- **12+ Languages:** Rust, Python, TypeScript, JavaScript, Go, Java, C, C++, Ruby, PHP, Kotlin, Swift.
+- **Hotspot Awareness:** Prioritizes reviews on "high-churn" files that break often.
+
+---
+
+## 📦 Install
+
+### Recommended (npm)
+The fastest way to try Argus. Zero compiled dependencies.
+```bash
+npx argus-ai init     # Generates .argus.toml
+npx argus-ai review   # Runs a review
+```
+
+### macOS / Linux (Homebrew)
 ```bash
 brew tap Meru143/argus
 brew install argus
 ```
 
-### npm (Recommended)
-
-```bash
-npx argus-ai --help
-# or
-npm install -g argus-ai
-```
-
-### Cargo
-
+### Rust (Cargo)
 ```bash
 cargo install argus-ai
 ```
 
-### From Source
+---
+
+## 🛠 Usage
+
+### 1. Code Review (`review`)
+The core workflow. Reviews your staged changes or a specific branch.
 
 ```bash
-cargo install --path .
-```
+# Review local changes vs main
+git diff main | argus review
 
-## Subcommands
-
-### `review` — AI Code Review
-Run a context-aware review on any diff or PR.
-
-```bash
-# Review local changes
-git diff main | argus review --repo .
-
-# Review a GitHub PR (posts comments back to GitHub)
+# Review a PR (and post comments to GitHub)
 argus review --pr owner/repo#42 --post-comments
 ```
 
-### `describe` — PR Descriptions
-Generate structured, conventional-commit PR descriptions from your changes.
+### 2. Feedback Loop (`feedback`)
+Teach Argus what you like. Run this after a review to rate the comments.
 
 ```bash
-# Generate description for staged changes
-argus describe
+argus feedback
+# Output:
+# [1/5] "Consider using Arc instead of Rc..."
+# (y) Useful  (n) Noise  (s) Skip
+```
 
-# Generate for a specific PR
+### 3. PR Descriptions (`describe`)
+Stop writing boilerplate. Generate semantic PR descriptions from your code changes.
+
+```bash
 argus describe --pr owner/repo#42
 ```
 
-### `feedback` — Improve Reviews
-Rate comments from your last review to train Argus on your preferences.
+### 4. Deep Analysis (`map`, `history`)
+Understand your codebase structure and risks.
 
 ```bash
-# Start interactive feedback session
-argus feedback
+# Visualize module structure & page rank
+argus map --limit 20
+
+# Find "bus factor" risks (files only one person touches)
+argus history --analysis hotspots
 ```
 
-### `map` — Codebase Structure
-Generate a ranked map of your codebase structure (tree-sitter + PageRank).
+---
 
-```bash
-argus map --path . --max-tokens 2048
-```
+## ⚙️ Configuration
 
-### `search` — Semantic Search
-Hybrid code search using embeddings (Voyage/Gemini/OpenAI) + keywords.
-
-```bash
-argus search "auth middleware" --path . --limit 5
-```
-
-### `history` — Git Intelligence
-Detect hotspots, temporal coupling, and bus factor risks.
-
-```bash
-argus history --path . --analysis hotspots --since 90
-```
-
-### `diff` — Risk Scoring
-Analyze diffs for risk based on size, complexity, and diffusion.
-
-```bash
-git diff | argus diff
-```
-
-### `mcp` — MCP Server
-Connect Argus to Cursor, Windsurf, or Claude Code.
-
-```bash
-argus mcp --path /absolute/path/to/repo
-```
-
-### `doctor` — Diagnostics
-Check your environment, API keys, and configuration.
-
-```bash
-argus doctor
-```
-
-## GitHub Action
-
-Add automated reviews to your PRs:
-
-```yaml
-name: Argus Review
-on: [pull_request]
-permissions:
-  pull-requests: write
-  contents: read
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - name: Install Argus
-        run: npm install -g argus-ai
-      - name: Run Review
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          argus-ai review \
-            --diff origin/${{ github.base_ref }}..HEAD \
-            --pr ${{ github.repository }}#${{ github.event.pull_request.number }} \
-            --post-comments \
-            --fail-on bug
-```
-
-## MCP Setup
-
-<details>
-<summary><strong>Claude Code</strong></summary>
-
-Add to `~/.mcp.json` or project `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "argus": {
-      "command": "argus",
-      "args": ["mcp", "--path", "/absolute/path/to/repo"]
-    }
-  }
-}
-```
-</details>
-
-<details>
-<summary><strong>Cursor / Windsurf</strong></summary>
-
-Add to generic MCP settings:
-
-```json
-{
-  "argus": {
-    "command": "argus",
-    "args": ["mcp", "--path", "."]
-  }
-}
-```
-</details>
-
-## Configuration
-
-Run `argus init` to generate a `.argus.toml`:
+Run `argus init` to generate a `.argus.toml`.
 
 ```toml
 [review]
-# max_comments = 5
-# min_confidence = 90
-# skip_patterns = ["*.lock", "*.min.js", "vendor/**"]
-```
+min_confidence = "high"   # low, medium, high
+language = "en"           # Review language
+skip_patterns = ["*.lock", "dist/**"]
 
-## Custom Rules
+[feedback]
+learning_rate = 0.1       # How fast Argus adapts
 
-Argus supports natural language custom rules. Create a file at `.argus/rules.md` (or `.argus/rules/**/*.md`) to guide the AI reviewer.
-
-**Example `.argus/rules.md`:**
-```markdown
-- Always suggest using `anyhow::Result` instead of `Result<T, Box<dyn Error>>`.
-- Flag usage of `unwrap()` in production code; suggest `expect()` or error handling.
-- Ensure all public functions have doc comments.
-```
-
-### LLM Providers
-
-| Provider | Config | Model | Env Variable |
-|----------|--------|-------|-------------|
-| Gemini | `provider = "gemini"` | `gemini-2.0-flash` | `GEMINI_API_KEY` |
-| OpenAI | `provider = "openai"` | `gpt-4o` | `OPENAI_API_KEY` |
-| Anthropic | `provider = "anthropic"` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
-| Ollama | `provider = "ollama"` | `llama3` | (None) |
-
-### Embedding Providers
-
-| Provider | Config | Model | Env Variable |
-|----------|--------|-------|-------------|
-| Gemini | `provider = "gemini"` | `text-embedding-004` | `GEMINI_API_KEY` |
-| Voyage | `provider = "voyage"` | `voyage-code-3` | `VOYAGE_API_KEY` |
-| OpenAI | `provider = "openai"` | `text-embedding-3-small` | `OPENAI_API_KEY` |
-
-**Zero-cost setup:** Use Gemini for both LLM and embeddings with a [free API key](https://aistudio.google.com/apikey).
-
-```toml
 [llm]
-provider = "gemini"
-
-[embedding]
-provider = "gemini"
+provider = "gemini"       # gemini, openai, anthropic, ollama
+model = "gemini-2.0-flash"
 ```
 
-### Environment Variables
+**Free Tier:** Argus defaults to Gemini (Flash/Pro), which has a generous free tier suitable for most daily review workflows.
 
-| Variable | Purpose |
-|----------|---------|
-| `GEMINI_API_KEY` | Gemini LLM + embeddings |
-| `OPENAI_API_KEY` | OpenAI LLM + embeddings |
-| `ANTHROPIC_API_KEY` | Anthropic LLM |
-| `VOYAGE_API_KEY` | Voyage embeddings |
-| `GITHUB_TOKEN` | GitHub PR integration |
+---
 
-## Architecture
+## 🧩 Integrations
 
-```
-                    ┌─────────────┐
-                    │   argus     │
-                    └──────┬──────┘
-                           │
-          ┌────────────────┼────────────────┐
-          ▼                ▼                ▼
-  ┌───────────────┐ ┌───────────┐ ┌──────────────┐
-  │ argus-review  │ │ argus-mcp │ │  subcommands │
-  └───────┬───────┘ └─────┬─────┘ └───────┬──────┘
-          │               │               │
-    ┌─────┴─────┬─────────┘               │
-    ▼           ▼           ▼             ▼
-┌─────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐
-│ repomap │ │difflens │ │ codelens │ │ gitpulse │
-└─────────┘ └─────────┘ └──────────┘ └──────────┘
+### MCP (Claude Code, Cursor, Windsurf)
+Argus runs as an **MCP Server**, giving your IDE agent access to its deep analysis tools.
+
+**Claude Code:**
+Add to `~/.mcp.json`:
+```json
+{
+  "mcpServers": {
+    "argus": { "command": "argus", "args": ["mcp", "--path", "/path/to/repo"] }
+  }
+}
 ```
 
-**Crate dependency order:**
-```
-core (no internal deps)
-  ├── repomap (core)
-  ├── difflens (core)
-  ├── gitpulse (core)
-  ├── codelens (core, repomap)
-  └── review (core, repomap, difflens, codelens, gitpulse)
-        └── mcp (core, review)
-```
+---
 
-## Contributing
+## 🏗 Architecture
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+Argus is a **Unix-style** pipeline of six specialized tools:
+
+1.  **`repomap`**: Builds a compact tree-sitter map of your code.
+2.  **`difflens`**: Analyzes the raw diff for syntactic changes.
+3.  **`gitpulse`**: Mining git history for hotspots and coupling.
+4.  **`codelens`**: Semantic search and cross-reference resolution.
+5.  **`review`**: The LLM brain that synthesizes all inputs.
+6.  **`mcp`**: The bridge to external agents.
+
+---
 
 ## License
 
-MIT
+MIT © [Meru Patel](https://github.com/Meru143)
