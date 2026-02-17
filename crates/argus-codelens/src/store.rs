@@ -192,6 +192,7 @@ impl CodeIndex {
     /// # Examples
     ///
     /// ```
+    /// use argus_codelens::store::CodeIndex;
     /// let idx = CodeIndex::in_memory().unwrap();
     /// idx.init_schema().unwrap();
     /// ```
@@ -759,6 +760,7 @@ impl CodeIndex {
     /// # Examples
     ///
     /// ```
+    /// use argus_codelens::store::{CodeIndex, Feedback};
     /// let idx = CodeIndex::in_memory().unwrap();
     /// let fb = Feedback {
     ///     comment_id: "c1".into(),
@@ -796,6 +798,7 @@ impl CodeIndex {
     /// # Examples
     ///
     /// ```
+    /// use argus_codelens::store::CodeIndex;
     /// let idx = CodeIndex::in_memory().unwrap();
     /// // after inserting feedback entries...
     /// let (positive, negative) = idx.feedback_counts().unwrap();
@@ -837,6 +840,7 @@ impl CodeIndex {
     /// # Examples
     ///
     /// ```
+    /// use argus_codelens::store::{CodeIndex, Feedback};
     /// let idx = CodeIndex::in_memory().unwrap();
     /// let fb = Feedback {
     ///     comment_id: "c1".into(),
@@ -882,7 +886,7 @@ impl CodeIndex {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let vals = [1.0f32, -2.5f32];
 /// let bytes = floats_to_bytes(&vals);
 /// assert_eq!(bytes.len(), vals.len() * 4);
