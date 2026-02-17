@@ -239,7 +239,8 @@ impl CodeIndex {
                     line_number INTEGER,
                     comment_text TEXT NOT NULL,
                     rating INTEGER NOT NULL,
-                    timestamp TEXT NOT NULL
+                    timestamp TEXT NOT NULL,
+                    UNIQUE(comment_id, rating)
                 );
                 ",
             )
@@ -732,7 +733,7 @@ impl CodeIndex {
     pub fn insert_feedback(&self, feedback: &Feedback) -> Result<(), ArgusError> {
         self.conn
             .execute(
-                "INSERT INTO feedback (comment_id, file_path, line_number, comment_text, rating, timestamp)
+                "INSERT OR REPLACE INTO feedback (comment_id, file_path, line_number, comment_text, rating, timestamp)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     feedback.comment_id,
