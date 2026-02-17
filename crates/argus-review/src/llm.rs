@@ -421,8 +421,8 @@ impl LlmClient {
 
         // Gemini uses key in URL, no Authorization header needed
         let mut response = None;
-        let max_retries = 3;
-        let mut backoff = Duration::from_secs(5);
+        let max_retries = 5;
+        let mut backoff = Duration::from_secs(10);
 
         for attempt in 0..=max_retries {
             let res = self
