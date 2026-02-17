@@ -1036,4 +1036,40 @@ mod tests {
         let index = CodeIndex::in_memory().unwrap();
         assert_eq!(index.get_dimensions().unwrap(), None);
     }
+
+    #[test]
+    fn feedback_round_trip() {
+        let index = CodeIndex::in_memory().unwrap();
+
+        let fb = Feedback {
+            comment_id: "test_comment_1".into(),
+            file_path: "src/main.rs".into(),
+            line_number: Some(10),
+            comment_text: "bad code".into(),
+            rating: -1,
+            timestamp: chrono_now(),
+        };
+
+        index.insert_feedback(&fb).unwrap();
+
+        let (pos, neg) = index.feedback_counts().unwrap();
+        assert_eq!(pos, 0);
+        assert_eq!(neg, 1);
+
+        let negatives = index.get_negative_feedback(10).unwrap();
+        assert_eq!(negatives.len(), 1);
+        assert_eq!(negatives[0], "bad code");
+
+        // Upsert: change rating to positive
+        let mut fb_updated = fb.clone();
+        fb_updated.rating = 1;
+        index.insert_feedback(&fb_updated).unwrap();
+
+        let (pos, neg) = index.feedback_counts().unwrap();
+        assert_eq!(pos, 1);
+        assert_eq!(neg, 0);
+
+        let negatives = index.get_negative_feedback(10).unwrap();
+        assert!(negatives.is_empty());
+    }
 }

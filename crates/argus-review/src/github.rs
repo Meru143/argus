@@ -164,8 +164,17 @@ impl GitHubClient {
         match result {
             Ok(_response) => Ok(()),
             Err(e) => {
-                // If REQUEST_CHANGES fails, try falling back to COMMENT
-                if event == "REQUEST_CHANGES" {
+                // If REQUEST_CHANGES fails with a permission/validation error (e.g. self-review),
+                // try falling back to COMMENT.
+                // We check for 422 Unprocessable Entity (common for self-review restrictions)
+                // or specific error messages.
+                let error_msg = e.to_string();
+                let is_permission_error = error_msg.contains("422")
+                    || error_msg.contains("Unprocessable Entity")
+                    || error_msg.contains("Validation Failed")
+                    || error_msg.contains("can't request changes");
+
+                if event == "REQUEST_CHANGES" && is_permission_error {
                     let fallback_body = serde_json::json!({
                         "event": "COMMENT",
                         "body": format!("{}\n\n*(Note: Originally intended as REQUEST_CHANGES, but fell back to COMMENT due to permission restrictions)*", summary),
@@ -175,8 +184,11 @@ impl GitHubClient {
                     self.octocrab
                         .post::<_, serde_json::Value>(&route, Some(&fallback_body))
                         .await
-                        .map_err(|e| {
-                            ArgusError::GitHub(format!("failed to post review (fallback): {e}"))
+                        .map_err(|fallback_err| {
+                            // Chain both errors so neither is lost
+                            ArgusError::GitHub(format!(
+                                "failed to post review: {e} (fallback also failed: {fallback_err})"
+                            ))
                         })?;
 
                     Ok(())
