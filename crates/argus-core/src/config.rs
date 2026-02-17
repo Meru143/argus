@@ -221,7 +221,7 @@ fn default_severity_filter() -> Vec<Severity> {
 }
 
 fn default_max_diff_tokens() -> usize {
-    4000
+    64000
 }
 
 fn default_cross_file() -> bool {
@@ -334,7 +334,7 @@ mod tests {
         let config = ArgusConfig::default();
         assert_eq!(config.review.max_comments, 5);
         assert_eq!(config.review.min_confidence, 90.0);
-        assert_eq!(config.review.max_diff_tokens, 4000);
+        assert_eq!(config.review.max_diff_tokens, 64000);
         assert!(!config.review.include_suggestions);
         assert!(config.review.skip_patterns.is_empty());
         assert!(config.review.skip_extensions.is_empty());
@@ -435,7 +435,7 @@ max_comments = 10
         let config = ArgusConfig::from_toml(toml).unwrap();
         assert!(config.review.skip_patterns.is_empty());
         assert!(config.review.skip_extensions.is_empty());
-        assert_eq!(config.review.max_diff_tokens, 4000);
+        assert_eq!(config.review.max_diff_tokens, 64000);
         assert!(!config.review.include_suggestions);
     }
 
