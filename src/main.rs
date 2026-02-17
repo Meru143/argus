@@ -647,6 +647,24 @@ const DEFAULT_CONFIG: &str = r#"# Argus Configuration
 # description = "Do not use .unwrap() in production code"
 "#;
 
+/// Program entry point that parses CLI arguments, loads configuration, initializes
+/// clients and services, and dispatches the selected subcommand.
+///
+/// This function sets up error and panic handlers, resolves the effective
+/// configuration (.argus.toml or defaults), determines color and verbosity
+/// behavior, and runs the requested subcommand (map, diff, search, history,
+/// review, mcp, describe, feedback, init, doctor, completions). It also
+/// performs preflight checks (API keys, repository validation), formats output
+/// according to the chosen OutputFormat, persists review state for the review
+/// workflow, and enforces CLI flags such as --post-comments, --apply-patches,
+/// --incremental, and --fail-on.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Run the binary to show help text (do not execute in doc tests).
+/// // $ argus --help
+/// ```
 #[tokio::main]
 async fn main() -> Result<()> {
     miette::set_hook(Box::new(|_| {
