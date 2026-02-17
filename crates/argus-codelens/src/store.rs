@@ -705,7 +705,7 @@ impl CodeIndex {
         let total_feedback: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM feedback", [], |row| row.get(0))
-            .unwrap_or(0);
+            .map_err(|e| ArgusError::Database(format!("failed to count feedback: {e}")))?;
 
         // For in-memory databases, page_count returns a small number
         let page_count: i64 = self
@@ -759,7 +759,7 @@ impl CodeIndex {
                 [],
                 |row| row.get(0),
             )
-            .unwrap_or(0);
+            .map_err(|e| ArgusError::Database(format!("failed to count positive feedback: {e}")))?;
 
         let neg: i64 = self
             .conn
@@ -768,7 +768,7 @@ impl CodeIndex {
                 [],
                 |row| row.get(0),
             )
-            .unwrap_or(0);
+            .map_err(|e| ArgusError::Database(format!("failed to count negative feedback: {e}")))?;
 
         Ok((pos as usize, neg as usize))
     }
