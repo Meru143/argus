@@ -75,8 +75,10 @@ pub enum SearchSource {
 ///     total_chunks: 100,
 ///     total_files: 10,
 ///     index_size_bytes: 50000,
+///     total_feedback: 5,
 /// };
 /// assert_eq!(stats.total_chunks, 100);
+/// assert_eq!(stats.total_feedback, 5);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
