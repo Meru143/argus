@@ -788,7 +788,7 @@ impl CodeIndex {
             .map_err(|e| ArgusError::Database(format!("failed to prepare feedback query: {e}")))?;
 
         let rows = stmt
-            .query_map(params![limit], |row| row.get(0))
+            .query_map(params![limit as i64], |row| row.get(0))
             .map_err(|e| ArgusError::Database(format!("feedback query failed: {e}")))?;
 
         let mut messages = Vec::new();
