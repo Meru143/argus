@@ -35,6 +35,11 @@ pub enum ArgusError {
     #[diagnostic(code(argus::git), help("Make sure you're inside a git repository"))]
     Git(String),
 
+    /// GitHub API failure.
+    #[error("GitHub API error: {0}")]
+    #[diagnostic(code(argus::github), help("Check your GITHUB_TOKEN permissions and network connection"))]
+    GitHub(String),
+
     /// Source code parsing failure.
     #[error("Parse error: {0}")]
     #[diagnostic(

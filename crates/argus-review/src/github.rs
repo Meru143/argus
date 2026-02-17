@@ -24,7 +24,7 @@ impl GitHubClient {
     /// # Errors
     ///
     /// Returns [`ArgusError::Config`] if no token is available, or
-    /// [`ArgusError::Git`] if the client cannot be built.
+    /// [`ArgusError::GitHub`] if the client cannot be built.
     ///
     /// # Examples
     ///
@@ -46,7 +46,7 @@ impl GitHubClient {
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(token.clone())
             .build()
-            .map_err(|e| ArgusError::Git(format!("failed to create GitHub client: {e}")))?;
+            .map_err(|e| ArgusError::GitHub(format!("failed to create GitHub client: {e}")))?;
 
         let http = reqwest::Client::new();
 
@@ -61,7 +61,7 @@ impl GitHubClient {
     ///
     /// # Errors
     ///
-    /// Returns [`ArgusError::Git`] on network or API errors.
+    /// Returns [`ArgusError::GitHub`] on network or API errors.
     pub async fn get_pr_diff(
         &self,
         owner: &str,
@@ -78,12 +78,12 @@ impl GitHubClient {
             .header("User-Agent", "argus")
             .send()
             .await
-            .map_err(|e| ArgusError::Git(format!("failed to fetch PR diff: {e}")))?;
+            .map_err(|e| ArgusError::GitHub(format!("failed to fetch PR diff: {e}")))?;
 
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(ArgusError::Git(format!(
+            return Err(ArgusError::GitHub(format!(
                 "GitHub API error {status}: {body}"
             )));
         }
@@ -91,7 +91,7 @@ impl GitHubClient {
         response
             .text()
             .await
-            .map_err(|e| ArgusError::Git(format!("failed to read diff response: {e}")))
+            .map_err(|e| ArgusError::GitHub(format!("failed to read diff response: {e}")))
     }
 
     /// Post review comments to a pull request.
@@ -100,9 +100,11 @@ impl GitHubClient {
     /// The review event is determined by the highest severity comment:
     /// Bug -> REQUEST_CHANGES, Warning/Suggestion/Info -> COMMENT.
     ///
+    /// If `REQUEST_CHANGES` fails (e.g., self-review not allowed), it falls back to `COMMENT`.
+    ///
     /// # Errors
     ///
-    /// Returns [`ArgusError::Git`] on API errors.
+    /// Returns [`ArgusError::GitHub`] on API errors.
     pub async fn post_review(
         &self,
         owner: &str,
@@ -156,13 +158,31 @@ impl GitHubClient {
             "comments": review_comments,
         });
 
-        let _response: serde_json::Value = self
-            .octocrab
-            .post(route, Some(&body))
-            .await
-            .map_err(|e| ArgusError::Git(format!("failed to post review: {e}")))?;
+        // Try posting the review
+        let result: Result<serde_json::Value, _> = self.octocrab.post(&route, Some(&body)).await;
 
-        Ok(())
+        match result {
+            Ok(_response) => Ok(()),
+            Err(e) => {
+                // If REQUEST_CHANGES fails, try falling back to COMMENT
+                if event == "REQUEST_CHANGES" {
+                    let fallback_body = serde_json::json!({
+                        "event": "COMMENT",
+                        "body": format!("{}\n\n*(Note: Originally intended as REQUEST_CHANGES, but fell back to COMMENT due to permission restrictions)*", summary),
+                        "comments": review_comments,
+                    });
+                    
+                    self.octocrab
+                        .post::<_, serde_json::Value>(&route, Some(&fallback_body))
+                        .await
+                        .map_err(|e| ArgusError::GitHub(format!("failed to post review (fallback): {e}")))?;
+                    
+                    Ok(())
+                } else {
+                    Err(ArgusError::GitHub(format!("failed to post review: {e}")))
+                }
+            }
+        }
     }
 }
 
