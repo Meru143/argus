@@ -171,12 +171,14 @@ impl GitHubClient {
                         "body": format!("{}\n\n*(Note: Originally intended as REQUEST_CHANGES, but fell back to COMMENT due to permission restrictions)*", summary),
                         "comments": review_comments,
                     });
-                    
+
                     self.octocrab
                         .post::<_, serde_json::Value>(&route, Some(&fallback_body))
                         .await
-                        .map_err(|e| ArgusError::GitHub(format!("failed to post review (fallback): {e}")))?;
-                    
+                        .map_err(|e| {
+                            ArgusError::GitHub(format!("failed to post review (fallback): {e}"))
+                        })?;
+
                     Ok(())
                 } else {
                     Err(ArgusError::GitHub(format!("failed to post review: {e}")))

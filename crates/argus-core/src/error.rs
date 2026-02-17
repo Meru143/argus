@@ -37,7 +37,10 @@ pub enum ArgusError {
 
     /// GitHub API failure.
     #[error("GitHub API error: {0}")]
-    #[diagnostic(code(argus::github), help("Check your GITHUB_TOKEN permissions and network connection"))]
+    #[diagnostic(
+        code(argus::github),
+        help("Check your GITHUB_TOKEN permissions and network connection")
+    )]
     GitHub(String),
 
     /// Source code parsing failure.
