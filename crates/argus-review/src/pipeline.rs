@@ -336,6 +336,11 @@ impl ReviewPipeline {
             };
 
             for (i, group) in groups.iter().enumerate() {
+                // Add a small delay between groups to avoid hitting free-tier rate limits
+                if i > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                }
+
                 let group_pb = if is_tty {
                     let label = group_display_name(group.as_slice());
                     let pb = mp.add(ProgressBar::new_spinner());

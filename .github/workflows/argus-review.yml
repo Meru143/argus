@@ -18,8 +18,8 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Argus
-        run: cargo install argus-ai --locked
+      - name: Build Argus
+        run: cargo build --release
 
       - name: Configure Argus
         run: |
@@ -35,7 +35,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          argus review \
+          ./target/release/argus review \
             --pr ${{ github.repository }}#${{ github.event.pull_request.number }} \
             --post-comments \
             --fail-on bug

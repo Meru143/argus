@@ -214,6 +214,13 @@ impl LlmClient {
             .map_err(|e| ArgusError::Llm(format!("OpenAI request failed: {e}")))?;
 
         let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(ArgusError::Llm(
+                "OpenAI API error 429 Too Many Requests: Rate limit exceeded. Please retry in a few seconds."
+                    .into(),
+            ));
+        }
+
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
             return Err(ArgusError::Llm(format!(
@@ -307,6 +314,13 @@ impl LlmClient {
             .map_err(|e| ArgusError::Llm(format!("Anthropic request failed: {e}")))?;
 
         let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(ArgusError::Llm(
+                "Anthropic API error 429 Too Many Requests: Rate limit exceeded. Please retry in a few seconds."
+                    .into(),
+            ));
+        }
+
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
             // Try to extract Anthropic's structured error message
@@ -416,6 +430,12 @@ impl LlmClient {
             .map_err(|e| ArgusError::Llm(redact(format!("Gemini request failed: {e}"))))?;
 
         let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(ArgusError::Llm(redact(format!(
+                "Gemini API error 429 Too Many Requests: Rate limit exceeded. Please retry in a few seconds."
+            ))));
+        }
+
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
             if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(&body_text) {
