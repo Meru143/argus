@@ -420,19 +420,38 @@ impl LlmClient {
         }
 
         // Gemini uses key in URL, no Authorization header needed
-        let response = self
-            .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| ArgusError::Llm(redact(format!("Gemini request failed: {e}"))))?;
+        let mut response = None;
+        let max_retries = 3;
+        let mut backoff = Duration::from_secs(5);
 
+        for attempt in 0..=max_retries {
+            let res = self
+                .client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| ArgusError::Llm(redact(format!("Gemini request failed: {e}"))))?;
+
+            if res.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                if attempt < max_retries {
+                    tokio::time::sleep(backoff).await;
+                    backoff *= 2;
+                    continue;
+                }
+            }
+
+            response = Some(res);
+            break;
+        }
+
+        let response = response.expect("retry loop must produce a response");
         let status = response.status();
+
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return Err(ArgusError::Llm(redact(
-                "Gemini API error 429 Too Many Requests: Rate limit exceeded. Please retry in a few seconds.".to_string()
+                "Gemini API error 429 Too Many Requests: Rate limit exceeded after retries.".to_string(),
             )));
         }
 
