@@ -434,12 +434,10 @@ impl LlmClient {
                 .await
                 .map_err(|e| ArgusError::Llm(redact(format!("Gemini request failed: {e}"))))?;
 
-            if res.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                if attempt < max_retries {
-                    tokio::time::sleep(backoff).await;
-                    backoff *= 2;
-                    continue;
-                }
+            if res.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < max_retries {
+                tokio::time::sleep(backoff).await;
+                backoff *= 2;
+                continue;
             }
 
             response = Some(res);
