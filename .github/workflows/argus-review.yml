@@ -27,7 +27,8 @@ jobs:
           cat > .argus.toml << 'EOF'
           [llm]
           provider = "gemini"
-          model = "gemini-2.5-flash"
+          [review]
+          self_reflection = false
           EOF
 
       - name: Run Review
