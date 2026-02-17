@@ -1,64 +1,46 @@
 use std::path::Path;
 
+use argus_codelens::store::{CodeIndex, Feedback};
 use argus_core::ReviewComment;
-use chrono::Utc;
-use rusqlite::{params, Connection, Result};
+use miette::Result; // Use miette::Result for easier error handling across crates
 use sha2::{Digest, Sha256};
 
 pub struct FeedbackStore {
-    conn: Connection,
+    index: CodeIndex,
 }
 
 impl FeedbackStore {
     pub fn open(repo_root: &Path) -> Result<Self> {
-        let argus_dir = repo_root.join(".argus");
-        if !argus_dir.exists() {
-            std::fs::create_dir_all(&argus_dir).expect("failed to create .argus directory");
-        }
-        let db_path = argus_dir.join("feedback.db");
-        let conn = Connection::open(db_path)?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS feedback (
-                id INTEGER PRIMARY KEY,
-                comment_hash TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                message TEXT NOT NULL,
-                verdict TEXT NOT NULL,
-                timestamp INTEGER NOT NULL,
-                UNIQUE(comment_hash, verdict)
-            )",
-            [],
-        )?;
-        Ok(Self { conn })
+        let index_path = repo_root.join(".argus/index.db");
+        // Open the shared index (creates tables if needed)
+        let index = CodeIndex::open(&index_path)?;
+        Ok(Self { index })
     }
 
     pub fn add_feedback(&self, comment: &ReviewComment, verdict: &str) -> Result<()> {
         let hash = compute_comment_hash(comment);
-        let timestamp = Utc::now().timestamp();
-        self.conn.execute(
-            "INSERT OR REPLACE INTO feedback (comment_hash, file_path, message, verdict, timestamp)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                hash,
-                comment.file_path.to_string_lossy(),
-                comment.message,
-                verdict,
-                timestamp
-            ],
-        )?;
+        // Map verdict string to integer rating
+        let rating = match verdict {
+            "positive" | "useful" => 1,
+            "negative" | "not useful" => -1,
+            _ => 0,
+        };
+
+        let feedback = Feedback {
+            comment_id: hash,
+            file_path: comment.file_path.to_string_lossy().to_string(),
+            line_number: Some(comment.line as usize),
+            comment_text: comment.message.clone(),
+            rating,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+
+        self.index.insert_feedback(&feedback)?;
         Ok(())
     }
 
     pub fn get_negative_examples(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT message FROM feedback WHERE verdict = 'negative' ORDER BY timestamp DESC LIMIT 5",
-        )?;
-        let rows = stmt.query_map([], |row| row.get(0))?;
-        let mut messages = Vec::new();
-        for r in rows {
-            messages.push(r?);
-        }
-        Ok(messages)
+        Ok(self.index.get_negative_feedback(5)?)
     }
 }
 

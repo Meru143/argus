@@ -83,6 +83,14 @@ argus describe
 argus describe --pr owner/repo#42
 ```
 
+### `feedback` — Improve Reviews
+Rate comments from your last review to train Argus on your preferences.
+
+```bash
+# Start interactive feedback session
+argus feedback
+```
+
 ### `map` — Codebase Structure
 Generate a ranked map of your codebase structure (tree-sitter + PageRank).
 

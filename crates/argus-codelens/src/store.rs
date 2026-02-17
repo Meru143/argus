@@ -87,6 +87,25 @@ pub struct IndexStats {
     pub total_files: usize,
     /// Size of the index database in bytes.
     pub index_size_bytes: u64,
+    /// Total number of feedback entries.
+    pub total_feedback: usize,
+}
+
+/// User feedback on a review comment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Feedback {
+    /// Unique ID of the comment (hash).
+    pub comment_id: String,
+    /// File path where the comment was made.
+    pub file_path: String,
+    /// Line number of the comment.
+    pub line_number: Option<usize>,
+    /// The text of the comment.
+    pub comment_text: String,
+    /// The user's rating (1 = useful, -1 = not useful).
+    pub rating: i32,
+    /// Timestamp (ISO 8601).
+    pub timestamp: String,
 }
 
 /// SQLite-based code index with FTS5 keyword search and BLOB-stored embeddings.
@@ -210,6 +229,16 @@ impl CodeIndex {
                     INSERT INTO chunks_fts(rowid, entity_name, content, context_header)
                     VALUES (new.id, new.entity_name, new.content, new.context_header);
                 END;
+
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    comment_id TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    line_number INTEGER,
+                    comment_text TEXT NOT NULL,
+                    rating INTEGER NOT NULL,
+                    timestamp TEXT NOT NULL
+                );
                 ",
             )
             .map_err(|e| ArgusError::Database(format!("failed to create schema: {e}")))?;
@@ -670,6 +699,11 @@ impl CodeIndex {
             .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
             .map_err(|e| ArgusError::Database(format!("failed to count files: {e}")))?;
 
+        let total_feedback: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM feedback", [], |row| row.get(0))
+            .unwrap_or(0);
+
         // For in-memory databases, page_count returns a small number
         let page_count: i64 = self
             .conn
@@ -684,7 +718,82 @@ impl CodeIndex {
             total_chunks: total_chunks as usize,
             total_files: total_files as usize,
             index_size_bytes: (page_count * page_size) as u64,
+            total_feedback: total_feedback as usize,
         })
+    }
+
+    /// Record user feedback for a review comment.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ArgusError::Database`] on insert failure.
+    pub fn insert_feedback(&self, feedback: &Feedback) -> Result<(), ArgusError> {
+        self.conn
+            .execute(
+                "INSERT INTO feedback (comment_id, file_path, line_number, comment_text, rating, timestamp)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    feedback.comment_id,
+                    feedback.file_path,
+                    feedback.line_number,
+                    feedback.comment_text,
+                    feedback.rating,
+                    feedback.timestamp,
+                ],
+            )
+            .map_err(|e| ArgusError::Database(format!("failed to insert feedback: {e}")))?;
+        Ok(())
+    }
+
+    /// Get aggregated feedback statistics.
+    ///
+    /// Returns (positive_count, negative_count).
+    pub fn feedback_counts(&self) -> Result<(usize, usize), ArgusError> {
+        let pos: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM feedback WHERE rating > 0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        let neg: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM feedback WHERE rating < 0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        Ok((pos as usize, neg as usize))
+    }
+
+    /// Retrieve recent negative feedback examples.
+    ///
+    /// Useful for few-shot prompting to teach the LLM what *not* to do.
+    pub fn get_negative_feedback(&self, limit: usize) -> Result<Vec<String>, ArgusError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT comment_text FROM feedback 
+                 WHERE rating < 0 
+                 ORDER BY id DESC 
+                 LIMIT ?1",
+            )
+            .map_err(|e| ArgusError::Database(format!("failed to prepare feedback query: {e}")))?;
+
+        let rows = stmt
+            .query_map(params![limit], |row| row.get(0))
+            .map_err(|e| ArgusError::Database(format!("feedback query failed: {e}")))?;
+
+        let mut messages = Vec::new();
+        for r in rows {
+            let msg: String = r.map_err(|e| ArgusError::Database(format!("failed to read row: {e}")))?;
+            messages.push(msg);
+        }
+        Ok(messages)
     }
 }
 

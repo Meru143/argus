@@ -1330,20 +1330,21 @@ async fn main() -> Result<()> {
                 let state = ReviewState {
                     last_reviewed_sha: head,
                     timestamp: Utc::now(),
+                    comments: result.comments.clone(),
                 };
                 if let Err(e) = state.save(&repo_root) {
                     eprintln!("warning: failed to save review state: {e}");
                 }
-            }
-
-            // Save last review result for feedback command
-            let argus_dir = repo_root.join(".argus");
-            if !argus_dir.exists() {
-                std::fs::create_dir_all(&argus_dir).into_diagnostic()?;
-            }
-            let last_review_path = argus_dir.join("last-review.json");
-            if let Ok(json) = serde_json::to_string(&result.comments) {
-                let _ = std::fs::write(last_review_path, json);
+            } else {
+                // Even if not incremental, save state so feedback command works
+                let state = ReviewState {
+                    last_reviewed_sha: "HEAD".to_string(),
+                    timestamp: Utc::now(),
+                    comments: result.comments.clone(),
+                };
+                if let Err(e) = state.save(&repo_root) {
+                    eprintln!("warning: failed to save review state: {e}");
+                }
             }
 
             if let Some(threshold) = fail_on {
@@ -1482,19 +1483,11 @@ async fn main() -> Result<()> {
             }
         }
         Some(Command::Feedback { ref path }) => {
-            let argus_dir = path.join(".argus");
-            let last_review_path = argus_dir.join("last-review.json");
-
-            if !last_review_path.exists() {
-                miette::bail!("No previous review found. Run 'argus review' first.");
-            }
-
-            let content = std::fs::read_to_string(&last_review_path).into_diagnostic()?;
-            let comments: Vec<argus_core::ReviewComment> =
-                serde_json::from_str(&content).into_diagnostic()?;
+            let state = ReviewState::load(path)?;
+            let comments = state.map(|s| s.comments).unwrap_or_default();
 
             if comments.is_empty() {
-                println!("No comments to review.");
+                println!("No comments to review. Run 'argus review' first.");
                 return Ok(());
             }
 
@@ -1503,7 +1496,7 @@ async fn main() -> Result<()> {
                 "Rate each comment as useful (y/+) or not useful (n/-). Press 's' to skip or 'q' to quit.\n"
             );
 
-            let store = argus_review::feedback::FeedbackStore::open(path).into_diagnostic()?;
+            let store = argus_review::feedback::FeedbackStore::open(path)?;
 
             for (i, c) in comments.iter().enumerate() {
                 println!("--- Comment {}/{} ---", i + 1, comments.len());
@@ -1525,12 +1518,12 @@ async fn main() -> Result<()> {
 
                     match input.as_str() {
                         "y" | "+" | "yes" => {
-                            store.add_feedback(c, "positive").into_diagnostic()?;
+                            store.add_feedback(c, "positive")?;
                             println!("Saved: 👍");
                             break;
                         }
                         "n" | "-" | "no" => {
-                            store.add_feedback(c, "negative").into_diagnostic()?;
+                            store.add_feedback(c, "negative")?;
                             println!("Saved: 👎 (will be suppressed in future)");
                             break;
                         }

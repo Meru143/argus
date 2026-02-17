@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use argus_core::ReviewComment;
 use chrono::{DateTime, Utc};
 use miette::{IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,12 @@ pub struct ReviewState {
 
     /// When the last review was performed.
     pub timestamp: DateTime<Utc>,
+
+    /// The comments generated in the last review.
+    ///
+    /// Stored here so the `feedback` command can load them for user rating.
+    #[serde(default)]
+    pub comments: Vec<ReviewComment>,
 }
 
 impl ReviewState {
