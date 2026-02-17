@@ -790,7 +790,8 @@ impl CodeIndex {
 
         let mut messages = Vec::new();
         for r in rows {
-            let msg: String = r.map_err(|e| ArgusError::Database(format!("failed to read row: {e}")))?;
+            let msg: String =
+                r.map_err(|e| ArgusError::Database(format!("failed to read row: {e}")))?;
             messages.push(msg);
         }
         Ok(messages)
