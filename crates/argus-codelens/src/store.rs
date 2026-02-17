@@ -240,7 +240,7 @@ impl CodeIndex {
                     comment_text TEXT NOT NULL,
                     rating INTEGER NOT NULL,
                     timestamp TEXT NOT NULL,
-                    UNIQUE(comment_id, rating)
+                    UNIQUE(comment_id)
                 );
                 ",
             )
