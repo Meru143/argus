@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/Meru143/argus/compare/argus-review-v0.3.2...argus-review-v0.4.0) - 2026-02-17
+
+### Added
+
+- implement learning from feedback (argus feedback)
+
+### Fixed
+
+- *(review)* improve permission error handling and add store tests
+- *(llm)* increase Gemini retry backoff to 10s/5-retries
+- *(lint)* collapse nested if in retry logic
+- *(llm)* add exponential backoff retry for Gemini 429 errors
+- *(review)* increase rate limit delay for free-tier Gemini
+- *(review)* remove useless format! to satisfy clippy
+- *(review)* use local build for review and add rate limit backing off
+- *(review)* handle self-review permissions and improve error messages
+- *(review)* use COMMENT event instead of REQUEST_CHANGES to avoid CI permission errors
+
+### Other
+
+- cargo fmt fix for llm.rs
+- cargo fmt
+- *(review)* restore REQUEST_CHANGES logic (AI review flagged safety regression)
+
 ## [0.3.1](https://github.com/Meru143/argus/compare/argus-review-v0.3.0...argus-review-v0.3.1) - 2026-02-16
 
 ### Added

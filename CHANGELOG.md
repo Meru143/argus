@@ -2,6 +2,27 @@
 
 All notable changes to Argus are documented here.
 
+## [0.4.0](https://github.com/Meru143/argus/compare/argus-ai-v0.3.2...argus-ai-v0.4.0) - 2026-02-17
+
+### Added
+
+- implement learning from feedback (argus feedback)
+
+### Fixed
+
+- *(review)* use local build for review and add rate limit backing off
+- use GH_PAT for release-pr to trigger CI checks
+
+### Other
+
+- revert model to gemini-2.5-flash to fix rate limits
+- add concurrency group to prevent rate limit collisions
+- update gemini model ID to gemini-3-pro-preview
+- upgrade argus review model to gemini-3-pro
+- disable self-reflection to avoid Gemini 429 rate limits
+- switch Argus review to gemini-2.5-flash
+- switch Argus review to gemini-1.5-flash to avoid 429s
+
 ## [0.3.2](https://github.com/Meru143/argus/compare/argus-ai-v0.3.1...argus-ai-v0.3.2) - 2026-02-16
 
 ### Fixed
