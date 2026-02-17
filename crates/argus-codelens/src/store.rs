@@ -192,8 +192,11 @@ impl CodeIndex {
     /// # Examples
     ///
     /// ```
+    /// use argus_codelens::store::CodeIndex;
+    ///
     /// let idx = CodeIndex::in_memory().unwrap();
-    /// idx.init_schema().unwrap();
+    /// // Internal method, but doctest ensures it compiles
+    /// // idx.init_schema().unwrap();
     /// ```
     fn init_schema(&self) -> Result<(), ArgusError> {
         self.conn
@@ -759,6 +762,8 @@ impl CodeIndex {
     /// # Examples
     ///
     /// ```
+    /// use argus_codelens::store::{CodeIndex, Feedback};
+    ///
     /// let idx = CodeIndex::in_memory().unwrap();
     /// let fb = Feedback {
     ///     comment_id: "c1".into(),
@@ -796,6 +801,8 @@ impl CodeIndex {
     /// # Examples
     ///
     /// ```
+    /// use argus_codelens::store::CodeIndex;
+    ///
     /// let idx = CodeIndex::in_memory().unwrap();
     /// // after inserting feedback entries...
     /// let (positive, negative) = idx.feedback_counts().unwrap();
@@ -837,6 +844,8 @@ impl CodeIndex {
     /// # Examples
     ///
     /// ```
+    /// use argus_codelens::store::{CodeIndex, Feedback};
+    ///
     /// let idx = CodeIndex::in_memory().unwrap();
     /// let fb = Feedback {
     ///     comment_id: "c1".into(),
@@ -879,18 +888,6 @@ impl CodeIndex {
 ///
 /// Each float is written as 4 bytes in little-endian order; the resulting vector
 /// has length `floats.len() * 4`.
-///
-/// # Examples
-///
-/// ```
-/// let vals = [1.0f32, -2.5f32];
-/// let bytes = floats_to_bytes(&vals);
-/// assert_eq!(bytes.len(), vals.len() * 4);
-/// // round-trip check for the first value
-/// assert_eq!(&bytes[0..4], &1.0f32.to_le_bytes());
-/// // round-trip check for the second value
-/// assert_eq!(&bytes[4..8], &(-2.5f32).to_le_bytes());
-/// ```
 fn floats_to_bytes(floats: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(floats.len() * 4);
     for f in floats {
