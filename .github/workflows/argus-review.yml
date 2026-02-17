@@ -27,6 +27,7 @@ jobs:
           cat > .argus.toml << 'EOF'
           [llm]
           provider = "gemini"
+          model = "gemini-3-pro"
           [review]
           self_reflection = false
           EOF
