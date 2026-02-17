@@ -31,7 +31,7 @@ jobs:
           cat > .argus.toml << 'EOF'
           [llm]
           provider = "gemini"
-          model = "gemini-3-pro-preview"
+          model = "gemini-2.5-flash"
           [review]
           self_reflection = false
           EOF
