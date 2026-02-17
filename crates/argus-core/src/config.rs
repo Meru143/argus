@@ -166,7 +166,7 @@ impl Default for LlmConfig {
 /// assert_eq!(config.min_confidence, 90.0);
 /// assert_eq!(config.max_comments, 5);
 /// assert!(!config.include_suggestions);
-/// assert_eq!(config.max_diff_tokens, 4000);
+/// assert_eq!(config.max_diff_tokens, 64000);
 /// assert!(config.cross_file);
 /// assert!(config.self_reflection);
 /// assert_eq!(config.self_reflection_score_threshold, 7);
