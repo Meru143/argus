@@ -336,9 +336,9 @@ impl ReviewPipeline {
             };
 
             for (i, group) in groups.iter().enumerate() {
-                // Add a small delay between groups to avoid hitting free-tier rate limits
+                // Add a significant delay between groups to avoid hitting free-tier rate limits (20 RPM)
                 if i > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
                 }
 
                 let group_pb = if is_tty {
