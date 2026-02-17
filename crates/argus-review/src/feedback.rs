@@ -27,7 +27,9 @@ impl FeedbackStore {
     ///
     /// ```
     /// use std::path::Path;
-    /// let store = argus_review::feedback::FeedbackStore::open(Path::new("."));
+    /// use argus_review::feedback::FeedbackStore;
+    ///
+    /// let store = FeedbackStore::open(Path::new("."));
     /// assert!(store.is_ok());
     /// ```
     pub fn open(repo_root: &Path) -> Result<Self> {
@@ -57,6 +59,9 @@ impl FeedbackStore {
     ///
     /// ```
     /// use std::path::Path;
+    /// use argus_review::feedback::FeedbackStore;
+    /// use argus_core::ReviewComment;
+    ///
     /// // Assuming FeedbackStore, ReviewComment are in scope and constructible.
     /// let store = FeedbackStore::open(Path::new(".")).unwrap();
     /// let comment = ReviewComment {
@@ -96,7 +101,11 @@ impl FeedbackStore {
     /// # Examples
     ///
     /// ```
+    /// use std::path::Path;
+    /// use argus_review::feedback::FeedbackStore;
+    ///
     /// // assuming `store` is a `FeedbackStore`
+    /// let store = FeedbackStore::open(Path::new(".")).unwrap();
     /// let examples = store.get_negative_examples().unwrap();
     /// assert!(examples.len() <= 5);
     /// ```
