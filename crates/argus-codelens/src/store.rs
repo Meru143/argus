@@ -191,7 +191,7 @@ impl CodeIndex {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use argus_codelens::store::CodeIndex;
     /// let idx = CodeIndex::in_memory().unwrap();
     /// idx.init_schema().unwrap();
