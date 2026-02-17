@@ -179,6 +179,22 @@ impl CodeIndex {
         Ok(index)
     }
 
+    /// Create the on-disk schema required for the index, including FTS5 virtual table and triggers.
+    ///
+    /// This sets up the following tables and objects if they do not already exist:
+    /// - `metadata` (key/value store)
+    /// - `files` (indexed file records)
+    /// - `chunks` (code chunks with optional embedding BLOB)
+    /// - `chunks_fts` (FTS5 virtual table over `entity_name`, `content`, `context_header`)
+    /// - triggers to keep `chunks_fts` synchronized with `chunks` on insert, delete, and update
+    /// - `feedback` (user feedback records)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let idx = CodeIndex::in_memory().unwrap();
+    /// idx.init_schema().unwrap();
+    /// ```
     fn init_schema(&self) -> Result<(), ArgusError> {
         self.conn
             .execute_batch(
@@ -675,11 +691,14 @@ impl CodeIndex {
         Ok(paths)
     }
 
-    /// Get index statistics.
+    /// Retrieve aggregated index statistics for the database.
+    ///
+    /// Returns counts for chunks and files, the approximate index size in bytes (derived from
+    /// SQLite page count and page size), and the total number of feedback entries.
     ///
     /// # Errors
     ///
-    /// Returns [`ArgusError::Database`] on query failure.
+    /// Returns `ArgusError::Database` if any underlying database query fails.
     ///
     /// # Examples
     ///
@@ -725,11 +744,32 @@ impl CodeIndex {
         })
     }
 
-    /// Record user feedback for a review comment.
+    /// Inserts a user feedback record into the index.
+    ///
+    /// Stores the provided `Feedback` in the `feedback` table.
+    ///
+    /// # Arguments
+    ///
+    /// * `feedback` - The `Feedback` record to persist.
     ///
     /// # Errors
     ///
-    /// Returns [`ArgusError::Database`] on insert failure.
+    /// Returns `ArgusError::Database` if inserting the feedback into the database fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let idx = CodeIndex::in_memory().unwrap();
+    /// let fb = Feedback {
+    ///     comment_id: "c1".into(),
+    ///     file_path: "src/lib.rs".into(),
+    ///     line_number: Some(10),
+    ///     comment_text: "Needs refactor".into(),
+    ///     rating: -1,
+    ///     timestamp: "1620000000".into(),
+    /// };
+    /// assert!(idx.insert_feedback(&fb).is_ok());
+    /// ```
     pub fn insert_feedback(&self, feedback: &Feedback) -> Result<(), ArgusError> {
         self.conn
             .execute(
@@ -748,9 +788,18 @@ impl CodeIndex {
         Ok(())
     }
 
-    /// Get aggregated feedback statistics.
+    /// Return counts of positive and negative feedback entries.
     ///
-    /// Returns (positive_count, negative_count).
+    /// The returned tuple's first element is the number of feedback rows with `rating > 0`,
+    /// and the second element is the number of feedback rows with `rating < 0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let idx = CodeIndex::in_memory().unwrap();
+    /// // after inserting feedback entries...
+    /// let (positive, negative) = idx.feedback_counts().unwrap();
+    /// ```
     pub fn feedback_counts(&self) -> Result<(usize, usize), ArgusError> {
         let pos: i64 = self
             .conn
@@ -773,9 +822,34 @@ impl CodeIndex {
         Ok((pos as usize, neg as usize))
     }
 
-    /// Retrieve recent negative feedback examples.
+    /// Returns recent negative feedback comment texts up to `limit`.
     ///
-    /// Useful for few-shot prompting to teach the LLM what *not* to do.
+    /// The results are ordered from newest to oldest and include only feedback rows with a rating less than zero.
+    ///
+    /// # Parameters
+    ///
+    /// - `limit`: maximum number of feedback messages to return.
+    ///
+    /// # Returns
+    ///
+    /// A vector of feedback `comment_text` strings, ordered by descending insertion id (newest first).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let idx = CodeIndex::in_memory().unwrap();
+    /// let fb = Feedback {
+    ///     comment_id: "c1".into(),
+    ///     file_path: "src/lib.rs".into(),
+    ///     line_number: None,
+    ///     comment_text: "This suggestion introduced a bug.".into(),
+    ///     rating: -1,
+    ///     timestamp: "ts".into(),
+    /// };
+    /// idx.insert_feedback(&fb).unwrap();
+    /// let msgs = idx.get_negative_feedback(10).unwrap();
+    /// assert_eq!(msgs, vec!["This suggestion introduced a bug.".to_string()]);
+    /// ```
     pub fn get_negative_feedback(&self, limit: usize) -> Result<Vec<String>, ArgusError> {
         let mut stmt = self
             .conn
@@ -801,6 +875,22 @@ impl CodeIndex {
     }
 }
 
+/// Encodes a slice of f32 values into a little-endian byte vector.
+///
+/// Each float is written as 4 bytes in little-endian order; the resulting vector
+/// has length `floats.len() * 4`.
+///
+/// # Examples
+///
+/// ```
+/// let vals = [1.0f32, -2.5f32];
+/// let bytes = floats_to_bytes(&vals);
+/// assert_eq!(bytes.len(), vals.len() * 4);
+/// // round-trip check for the first value
+/// assert_eq!(&bytes[0..4], &1.0f32.to_le_bytes());
+/// // round-trip check for the second value
+/// assert_eq!(&bytes[4..8], &(-2.5f32).to_le_bytes());
+/// ```
 fn floats_to_bytes(floats: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(floats.len() * 4);
     for f in floats {
