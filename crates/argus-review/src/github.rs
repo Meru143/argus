@@ -142,7 +142,12 @@ impl GitHubClient {
             })
             .collect();
 
-        let event = "COMMENT";
+        let has_bugs = comments.iter().any(|c| c.severity == Severity::Bug);
+        let event = if has_bugs {
+            "REQUEST_CHANGES"
+        } else {
+            "COMMENT"
+        };
 
         let route = format!("/repos/{owner}/{repo}/pulls/{pr_number}/reviews");
         let body = serde_json::json!({
