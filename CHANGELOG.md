@@ -2,6 +2,18 @@
 
 All notable changes to Argus are documented here.
 
+## [0.3.2](https://github.com/Meru143/argus/compare/argus-ai-v0.3.1...argus-ai-v0.3.2) - 2026-02-16
+
+### Fixed
+
+- remove invalid --diff argument from review workflow
+
+### Other
+
+- ignore and remove PLAN.md
+- ignore private sprint logs
+- add homebrew installation instructions
+
 ## [0.3.1](https://github.com/Meru143/argus/compare/argus-ai-v0.3.0...argus-ai-v0.3.1) - 2026-02-16
 
 ### Other
