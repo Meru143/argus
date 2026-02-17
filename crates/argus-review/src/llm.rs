@@ -431,9 +431,9 @@ impl LlmClient {
 
         let status = response.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Err(ArgusError::Llm(redact(format!(
-                "Gemini API error 429 Too Many Requests: Rate limit exceeded. Please retry in a few seconds."
-            ))));
+            return Err(ArgusError::Llm(redact(
+                "Gemini API error 429 Too Many Requests: Rate limit exceeded. Please retry in a few seconds.".to_string()
+            )));
         }
 
         if !status.is_success() {
