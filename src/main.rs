@@ -260,6 +260,19 @@ enum Command {
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
+    /// Install or uninstall git hooks for Argus
+    #[command(long_about = "Install or uninstall git hooks for Argus.\n\n\
+        Manages pre-commit hooks to run Argus review before each commit.\n\
+        Requires argus to be in your PATH.\n\n\
+        Examples:\n  argus hook install    # Install pre-commit hook\n  argus hook uninstall  # Remove pre-commit hook")]
+    Hook {
+        /// Hook action: install or uninstall
+        #[arg(value_enum)]
+        action: HookAction,
+        /// Repository path (default: current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
     /// Create a default .argus.toml configuration file
     #[command(long_about = "Create a default .argus.toml configuration file.\n\n\
         Generates a commented-out template with all available options.\n\
@@ -278,6 +291,14 @@ enum Command {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+}
+
+#[derive(Clone, ValueEnum)]
+enum HookAction {
+    /// Install pre-commit hook
+    Install,
+    /// Uninstall pre-commit hook
+    Uninstall,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -1726,6 +1747,63 @@ async fn main() -> Result<()> {
                 println!();
             }
             println!("Feedback session complete. Thank you!");
+        }
+        Some(Command::Hook { action, path }) => {
+            match action {
+                HookAction::Install => {
+                    let hook_content = r#"#!/bin/sh
+# Argus pre-commit hook
+# Runs Argus review on staged changes before commit
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    against=HEAD
+else
+    against=4b825dc642cb6eb9a060e54bf8d69288fbee4904  # empty tree
+fi
+
+# Get list of staged .rs files
+staged_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' | head -20)
+
+if [ -z "$staged_files" ]; then
+    exit 0
+fi
+
+# Create temp file for diff
+tmpfile=$(mktemp)
+git diff --cached -- "$staged_files" > "$tmpfile"
+
+# Run argus review
+if argus review --file "$tmpfile" --fail-on warning --repo .; then
+    rm -f "$tmpfile"
+    exit 0
+else
+    rm -f "$tmpfile"
+    echo "Argus review failed. Commit aborted."
+    echo "Use --no-verify to skip this hook if needed."
+    exit 1
+fi
+"#;
+
+                    let hook_path = path.join(".git/hooks/pre-commit");
+                    if hook_path.exists() {
+                        miette::bail!("pre-commit hook already exists at {}. Remove it first or run 'argus hook uninstall' first.", hook_path.display());
+                    }
+                    std::fs::write(&hook_path, hook_content).into_diagnostic()?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755)).into_diagnostic()?;
+                    }
+                    println!("Installed pre-commit hook at {}", hook_path.display());
+                }
+                HookAction::Uninstall => {
+                    let hook_path = path.join(".git/hooks/pre-commit");
+                    if !hook_path.exists() {
+                        miette::bail!("pre-commit hook not found at {}", hook_path.display());
+                    }
+                    std::fs::remove_file(&hook_path).into_diagnostic()?;
+                    println!("Removed pre-commit hook from {}", hook_path.display());
+                }
+            }
         }
         Some(Command::Init) => {
             let path = std::path::Path::new(".argus.toml");
