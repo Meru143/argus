@@ -210,6 +210,9 @@ enum Command {
         /// Review already-committed changes (e.g., HEAD, HEAD~3, or HEAD~3..HEAD)
         #[arg(long, conflicts_with = "pr", conflicts_with = "file")]
         commit: Option<String>,
+        /// Print metadata for commit message (e.g., "Argus: ran (iter:3, coverage:85%)")
+        #[arg(long)]
+        print_metadata: bool,
     },
     /// Start the MCP server for IDE integration
     #[command(
@@ -400,6 +403,13 @@ fn format_issues_for_copy(comments: &[ReviewComment]) -> String {
     }
 
     output
+}
+
+fn format_review_metadata(result: &argus_review::pipeline::ReviewResult) -> String {
+    // For now, just output the basic metadata
+    // Iterations and coverage tracking would require state persistence across reviews
+    let comment_count = result.comments.len();
+    format!("Argus: reviewed ({} comments)", comment_count)
 }
 
 #[derive(serde::Serialize)]
@@ -1147,6 +1157,7 @@ async fn main() -> Result<()> {
             ref base_sha,
             copy,
             ref commit,
+            print_metadata,
         }) => {
             // Hint: suggest `argus init` when no config file exists
             if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
@@ -1389,6 +1400,12 @@ async fn main() -> Result<()> {
             // state saving, and --fail-on still run after output
             if copy {
                 print!("{}", format_issues_for_copy(&result.comments));
+            }
+
+            // Handle --print-metadata flag: output metadata for commit messages
+            if print_metadata {
+                let metadata = format_review_metadata(&result);
+                println!("{metadata}");
             }
 
             match cli.format {
