@@ -210,7 +210,7 @@ enum Command {
         /// Review already-committed changes (e.g., HEAD, HEAD~3, or HEAD~3..HEAD)
         #[arg(long, conflicts_with = "pr", conflicts_with = "file")]
         commit: Option<String>,
-        /// Print metadata for commit message (e.g., "Argus: ran (iter:3, coverage:85%)")
+        /// Print metadata for commit message (e.g., "Argus: reviewed (3 comments)")
         #[arg(long)]
         print_metadata: bool,
     },
@@ -1405,7 +1405,7 @@ async fn main() -> Result<()> {
             // Handle --print-metadata flag: output metadata for commit messages
             if print_metadata {
                 let metadata = format_review_metadata(&result);
-                println!("{metadata}");
+                eprintln!("{metadata}");
             }
 
             match cli.format {
