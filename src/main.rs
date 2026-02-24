@@ -207,6 +207,9 @@ enum Command {
         /// Output issues in AI-agent-friendly format (for copy/paste)
         #[arg(long)]
         copy: bool,
+        /// Review already-committed changes (e.g., HEAD, HEAD~3, or HEAD~3..HEAD)
+        #[arg(long)]
+        commit: Option<String>,
     },
     /// Start the MCP server for IDE integration
     #[command(
@@ -1143,6 +1146,7 @@ async fn main() -> Result<()> {
             incremental,
             ref base_sha,
             copy,
+            ref commit,
         }) => {
             // Hint: suggest `argus init` when no config file exists
             if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
@@ -1161,6 +1165,33 @@ async fn main() -> Result<()> {
                 (github.get_pr_diff(&owner, &repo, pr_number).await?, None)
             } else if let Some(file_path) = file {
                 (read_diff_input(&Some(file_path.clone()))?, None)
+            } else if let Some(commit_ref) = commit {
+                // Review already-committed changes
+                let diff_output = std::process::Command::new("git")
+                    .args(["-C", &repo_root.to_string_lossy(), "diff", &commit_ref])
+                    .output()
+                    .into_diagnostic()
+                    .wrap_err(format!("Failed to run git diff {}", commit_ref))?;
+
+                if !diff_output.status.success() {
+                    let stderr = String::from_utf8_lossy(&diff_output.stderr);
+                    miette::bail!("git diff failed: {}", stderr.trim());
+                }
+
+                // Get the current HEAD for state saving
+                let head_output = std::process::Command::new("git")
+                    .args(["-C", &repo_root.to_string_lossy(), "rev-parse", "HEAD"])
+                    .output()
+                    .into_diagnostic()
+                    .wrap_err("Failed to run git rev-parse HEAD")?;
+
+                let current_head = if head_output.status.success() {
+                    Some(String::from_utf8_lossy(&head_output.stdout).trim().to_string())
+                } else {
+                    None
+                };
+
+                (String::from_utf8_lossy(&diff_output.stdout).to_string(), current_head)
             } else if incremental || base_sha.is_some() {
                 // Incremental review logic
                 let head_output = std::process::Command::new("git")
