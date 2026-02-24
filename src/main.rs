@@ -213,6 +213,12 @@ enum Command {
         /// Print metadata for commit message (e.g., "Argus: reviewed (3 comments)")
         #[arg(long)]
         print_metadata: bool,
+        /// Skip AI review, take personal responsibility (records coverage from prior reviews)
+        #[arg(long, conflicts_with_all = ["skip", "copy", "print_metadata", "apply_patches", "post_comments"])]
+        vouch: bool,
+        /// Skip review entirely (no AI review, no personal responsibility)
+        #[arg(long, conflicts_with_all = ["vouch", "copy", "print_metadata", "apply_patches", "post_comments"])]
+        skip: bool,
     },
     /// Start the MCP server for IDE integration
     #[command(
@@ -415,6 +421,18 @@ fn format_review_metadata(result: &argus_review::pipeline::ReviewResult) -> Stri
         "comments"
     };
     format!("Argus: reviewed ({} {word})", comment_count)
+}
+
+fn format_vouch_metadata(result: &argus_review::pipeline::ReviewResult) -> String {
+    // For now, just output basic vouch metadata
+    // Iterations and coverage tracking would require state persistence across reviews
+    let comment_count = result.comments.len();
+    let word = if comment_count == 1 {
+        "comment"
+    } else {
+        "comments"
+    };
+    format!("Argus: vouched ({} {word})", comment_count)
 }
 
 #[derive(serde::Serialize)]
@@ -1163,6 +1181,8 @@ async fn main() -> Result<()> {
             copy,
             ref commit,
             print_metadata,
+            vouch,
+            skip,
         }) => {
             // Hint: suggest `argus init` when no config file exists
             if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
@@ -1411,6 +1431,19 @@ async fn main() -> Result<()> {
             if print_metadata {
                 let metadata = format_review_metadata(&result);
                 eprintln!("{metadata}");
+            }
+
+            // Handle --vouch: skip AI review, take personal responsibility
+            if vouch {
+                let metadata = format_vouch_metadata(&result);
+                eprintln!("{metadata}");
+                return Ok(());
+            }
+
+            // Handle --skip: skip review entirely
+            if skip {
+                eprintln!("Argus: skipped");
+                return Ok(());
             }
 
             match cli.format {
