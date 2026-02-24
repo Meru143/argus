@@ -1750,25 +1750,43 @@ async fn main() -> Result<()> {
         }
         Some(Command::Hook { action, path }) => match action {
             HookAction::Install => {
-                let hook_content = r#"#!/bin/sh
+                // Check that .git/hooks directory exists
+                let hooks_dir = path.join(".git/hooks");
+                if !hooks_dir.is_dir() {
+                    miette::bail!(
+                        "Git hooks directory not found at {}. Is this a git repository?",
+                        hooks_dir.display()
+                    );
+                }
+
+                // Sentinel to identify Argus-managed hooks
+                const SENTINEL: &str = "# ARGUS_MANAGED_HOOK";
+
+                let hook_content = format!(r#"#!/bin/sh
+# {SENTINEL}
 # Argus pre-commit hook
 # Runs Argus review on staged changes before commit
-if git rev-parse --verify HEAD >/dev/null 2>&1; then
-    against=HEAD
-else
-    against=4b825dc642cb6eb9a060e54bf8d69288fbee4904  # empty tree
-fi
 
-# Get list of staged .rs files
-staged_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' | head -20)
+# Get list of staged .rs files into an array
+# Using grep -z for null-separated output to handle filenames with spaces
+staged_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' | sort -u)
 
 if [ -z "$staged_files" ]; then
     exit 0
 fi
 
+# Count files
+file_count=$(echo "$staged_files" | wc -l)
+if [ "$file_count" -gt 20 ]; then
+    echo "Warning: $file_count Rust files staged (limiting to first 20)"
+    staged_files=$(echo "$staged_files" | head -20)
+fi
+
 # Create temp file for diff
 tmpfile=$(mktemp)
-git diff --cached -- "$staged_files" > "$tmpfile"
+
+# Pass each file as separate argument to git diff
+echo "$staged_files" | xargs git diff --cached -- > "$tmpfile"
 
 # Run argus review
 if argus review --file "$tmpfile" --fail-on warning --repo .; then
@@ -1780,18 +1798,34 @@ else
     echo "Use --no-verify to skip this hook if needed."
     exit 1
 fi
-"#;
+"#, SENTINEL = SENTINEL);
 
                 let hook_path = path.join(".git/hooks/pre-commit");
                 if hook_path.exists() {
-                    miette::bail!("pre-commit hook already exists at {}. Remove it first or run 'argus hook uninstall' first.", hook_path.display());
+                    // Check if it's an Argus-managed hook
+                    if let Ok(content) = std::fs::read_to_string(&hook_path) {
+                        if content.contains(SENTINEL) {
+                            // Overwrite existing Argus hook
+                            std::fs::remove_file(&hook_path).into_diagnostic()?;
+                        } else {
+                            miette::bail!(
+                                "pre-commit hook already exists at {}. Remove it first or run 'argus hook uninstall' first.",
+                                hook_path.display()
+                            );
+                        }
+                    } else {
+                        miette::bail!(
+                            "pre-commit hook already exists at {}. Remove it first or run 'argus hook uninstall' first.",
+                            hook_path.display()
+                        );
+                    }
                 }
                 std::fs::write(&hook_path, hook_content).into_diagnostic()?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755))
-                        .into_diagnostic()?;
+                    let perms = std::fs::Permissions::from_mode(0o755);
+                    std::fs::set_permissions(&hook_path, perms).into_diagnostic()?;
                 }
                 println!("Installed pre-commit hook at {}", hook_path.display());
             }
@@ -1800,6 +1834,18 @@ fi
                 if !hook_path.exists() {
                     miette::bail!("pre-commit hook not found at {}", hook_path.display());
                 }
+
+                // Check if it's an Argus-managed hook
+                const SENTINEL: &str = "# ARGUS_MANAGED_HOOK";
+                if let Ok(content) = std::fs::read_to_string(&hook_path) {
+                    if !content.contains(SENTINEL) {
+                        miette::bail!(
+                            "pre-commit hook at {} was not installed by Argus. Remove it manually if needed.",
+                            hook_path.display()
+                        );
+                    }
+                }
+
                 std::fs::remove_file(&hook_path).into_diagnostic()?;
                 println!("Removed pre-commit hook from {}", hook_path.display());
             }
