@@ -1762,7 +1762,8 @@ async fn main() -> Result<()> {
                 // Sentinel to identify Argus-managed hooks
                 const SENTINEL: &str = "# ARGUS_MANAGED_HOOK";
 
-                let hook_content = format!(r#"#!/bin/sh
+                let hook_content = format!(
+                    r#"#!/bin/sh
 # {SENTINEL}
 # Argus pre-commit hook
 # Runs Argus review on staged changes before commit
@@ -1798,7 +1799,9 @@ else
     echo "Use --no-verify to skip this hook if needed."
     exit 1
 fi
-"#, SENTINEL = SENTINEL);
+"#,
+                    SENTINEL = SENTINEL
+                );
 
                 let hook_path = path.join(".git/hooks/pre-commit");
                 if hook_path.exists() {
