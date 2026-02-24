@@ -1332,7 +1332,11 @@ async fn main() -> Result<()> {
             if vouch {
                 // Create a mock result with zero comments for metadata
                 let comment_count = 0;
-                let word = if comment_count == 1 { "comment" } else { "comments" };
+                let word = if comment_count == 1 {
+                    "comment"
+                } else {
+                    "comments"
+                };
                 let metadata = format!("Argus: vouched ({} {word})", comment_count);
                 eprintln!("{metadata}");
                 return Ok(());
