@@ -208,7 +208,7 @@ enum Command {
         #[arg(long)]
         copy: bool,
         /// Review already-committed changes (e.g., HEAD, HEAD~3, or HEAD~3..HEAD)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "pr", conflicts_with = "file")]
         commit: Option<String>,
     },
     /// Start the MCP server for IDE integration
@@ -1167,32 +1167,76 @@ async fn main() -> Result<()> {
                 (read_diff_input(&Some(file_path.clone()))?, None)
             } else if let Some(commit_ref) = commit {
                 // Review already-committed changes
-                let diff_output = std::process::Command::new("git")
-                    .args(["-C", &repo_root.to_string_lossy(), "diff", commit_ref])
-                    .output()
-                    .into_diagnostic()
-                    .wrap_err(format!("Failed to run git diff {}", commit_ref))?;
+                // Check if commit_ref is a range (contains "..") or a single commit
+                let (diff_output, current_head) = if commit_ref.contains("..") {
+                    // Range: use git diff
+                    let diff_output = std::process::Command::new("git")
+                        .args(["-C", &repo_root.to_string_lossy(), "diff", commit_ref])
+                        .output()
+                        .into_diagnostic()
+                        .wrap_err(format!("Failed to run git diff {}", commit_ref))?;
 
-                if !diff_output.status.success() {
-                    let stderr = String::from_utf8_lossy(&diff_output.stderr);
-                    miette::bail!("git diff failed: {}", stderr.trim());
-                }
+                    if !diff_output.status.success() {
+                        let stderr = String::from_utf8_lossy(&diff_output.stderr);
+                        miette::bail!("git diff failed: {}", stderr.trim());
+                    }
 
-                // Get the current HEAD for state saving
-                let head_output = std::process::Command::new("git")
-                    .args(["-C", &repo_root.to_string_lossy(), "rev-parse", "HEAD"])
-                    .output()
-                    .into_diagnostic()
-                    .wrap_err("Failed to run git rev-parse HEAD")?;
+                    // Get the current HEAD for state saving
+                    let head_output = std::process::Command::new("git")
+                        .args(["-C", &repo_root.to_string_lossy(), "rev-parse", "HEAD"])
+                        .output()
+                        .into_diagnostic()
+                        .wrap_err("Failed to run git rev-parse HEAD")?;
 
-                let current_head = if head_output.status.success() {
-                    Some(
-                        String::from_utf8_lossy(&head_output.stdout)
-                            .trim()
-                            .to_string(),
-                    )
+                    let current_head = if head_output.status.success() {
+                        Some(
+                            String::from_utf8_lossy(&head_output.stdout)
+                                .trim()
+                                .to_string(),
+                        )
+                    } else {
+                        None
+                    };
+
+                    (diff_output, current_head)
                 } else {
-                    None
+                    // Single commit: use git show to get the exact patch
+                    let show_output = std::process::Command::new("git")
+                        .args([
+                            "-C",
+                            &repo_root.to_string_lossy(),
+                            "show",
+                            "--patch",
+                            "--format=",
+                            commit_ref,
+                        ])
+                        .output()
+                        .into_diagnostic()
+                        .wrap_err(format!("Failed to run git show {}", commit_ref))?;
+
+                    if !show_output.status.success() {
+                        let stderr = String::from_utf8_lossy(&show_output.stderr);
+                        miette::bail!("git show failed: {}", stderr.trim());
+                    }
+
+                    // Get the current HEAD for state saving
+                    let head_output = std::process::Command::new("git")
+                        .args(["-C", &repo_root.to_string_lossy(), "rev-parse", "HEAD"])
+                        .output()
+                        .into_diagnostic()
+                        .wrap_err("Failed to run git rev-parse HEAD")?;
+
+                    let current_head = if head_output.status.success() {
+                        Some(
+                            String::from_utf8_lossy(&head_output.stdout)
+                                .trim()
+                                .to_string(),
+                        )
+                    } else {
+                        None
+                    };
+
+                    (show_output, current_head)
                 };
 
                 (
@@ -1252,7 +1296,7 @@ async fn main() -> Result<()> {
             // Hint: empty diff input from stdin/git
             if diff_input.trim().is_empty() && pr.is_none() {
                 miette::bail!(miette::miette!(
-                    help = "Pipe a diff to argus, e.g.: git diff | argus review --repo .\n       Or use --file <path>, --pr owner/repo#123, or --incremental",
+                    help = "Pipe a diff to argus, e.g.: git diff | argus review --repo .\n       Or use --file <path>, --pr owner/repo#123, --commit <ref>, or --incremental",
                     "Empty diff input"
                 ));
             }
