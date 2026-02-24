@@ -1186,12 +1186,19 @@ async fn main() -> Result<()> {
                     .wrap_err("Failed to run git rev-parse HEAD")?;
 
                 let current_head = if head_output.status.success() {
-                    Some(String::from_utf8_lossy(&head_output.stdout).trim().to_string())
+                    Some(
+                        String::from_utf8_lossy(&head_output.stdout)
+                            .trim()
+                            .to_string(),
+                    )
                 } else {
                     None
                 };
 
-                (String::from_utf8_lossy(&diff_output.stdout).to_string(), current_head)
+                (
+                    String::from_utf8_lossy(&diff_output.stdout).to_string(),
+                    current_head,
+                )
             } else if incremental || base_sha.is_some() {
                 // Incremental review logic
                 let head_output = std::process::Command::new("git")
