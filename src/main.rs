@@ -1768,9 +1768,9 @@ async fn main() -> Result<()> {
 # Argus pre-commit hook
 # Runs Argus review on staged changes before commit
 
-# Get list of staged .rs files into an array
-# Using grep -z for null-separated output to handle filenames with spaces
-staged_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' | sort -u)
+# Get list of staged .rs files using NUL-delimited output
+# This handles filenames with spaces correctly
+staged_files=$(git diff --cached --name-only --diff-filter=ACM -z | tr '\0' '\n' | grep '\.rs$' | sort -u)
 
 if [ -z "$staged_files" ]; then
     exit 0
@@ -1786,8 +1786,11 @@ fi
 # Create temp file for diff
 tmpfile=$(mktemp)
 
-# Pass each file as separate argument to git diff
-echo "$staged_files" | xargs git diff --cached -- > "$tmpfile"
+# Iterate over files safely to build diff
+> "$tmpfile"
+while IFS= read -r file; do
+    git diff --cached -- "$file" >> "$tmpfile"
+done <<< "$staged_files"
 
 # Run argus review
 if argus review --file "$tmpfile" --fail-on warning --repo .; then
@@ -1840,13 +1843,12 @@ fi
 
                 // Check if it's an Argus-managed hook
                 const SENTINEL: &str = "# ARGUS_MANAGED_HOOK";
-                if let Ok(content) = std::fs::read_to_string(&hook_path) {
-                    if !content.contains(SENTINEL) {
-                        miette::bail!(
-                            "pre-commit hook at {} was not installed by Argus. Remove it manually if needed.",
-                            hook_path.display()
-                        );
-                    }
+                let content = std::fs::read_to_string(&hook_path).into_diagnostic()?;
+                if !content.contains(SENTINEL) {
+                    miette::bail!(
+                        "pre-commit hook at {} was not installed by Argus. Remove it manually if needed.",
+                        hook_path.display()
+                    );
                 }
 
                 std::fs::remove_file(&hook_path).into_diagnostic()?;
