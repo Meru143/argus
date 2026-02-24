@@ -204,7 +204,7 @@ enum Command {
         /// Base commit SHA for incremental review (overrides saved state)
         #[arg(long)]
         base_sha: Option<String>,
-        /// Copy issues to clipboard in AI-agent-friendly format
+        /// Output issues in AI-agent-friendly format (for copy/paste)
         #[arg(long)]
         copy: bool,
     },
@@ -374,10 +374,17 @@ fn format_issues_for_copy(comments: &[ReviewComment]) -> String {
             c.file_path.display(),
             c.line
         ));
-        output.push_str(&format!("   {}\n", c.message));
+
+        // Handle multi-line message with proper indentation
+        for line in c.message.lines() {
+            output.push_str(&format!("   {}\n", line));
+        }
 
         if let Some(suggestion) = &c.suggestion {
-            output.push_str(&format!("   Fix: {}\n", suggestion));
+            // Handle multi-line suggestion with proper indentation
+            for line in suggestion.lines() {
+                output.push_str(&format!("   Fix: {}\n", line));
+            }
         }
         if let Some(patch) = &c.patch {
             output.push_str("   ```diff\n");
@@ -1296,9 +1303,10 @@ async fn main() -> Result<()> {
             }
 
             // Handle --copy flag: output issues in AI-agent-friendly format
+            // Note: we don't return early so that apply_patches, post_comments,
+            // state saving, and --fail-on still run after output
             if copy {
                 print!("{}", format_issues_for_copy(&result.comments));
-                return Ok(());
             }
 
             match cli.format {
