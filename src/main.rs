@@ -7,7 +7,7 @@ use chrono::Utc;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use miette::{Context, IntoDiagnostic, Result};
 
-use argus_core::{OutputFormat, Severity};
+use argus_core::{OutputFormat, ReviewComment, Severity};
 
 #[derive(Parser)]
 #[command(
@@ -204,6 +204,9 @@ enum Command {
         /// Base commit SHA for incremental review (overrides saved state)
         #[arg(long)]
         base_sha: Option<String>,
+        /// Output issues in AI-agent-friendly format (for copy/paste)
+        #[arg(long)]
+        copy: bool,
     },
     /// Start the MCP server for IDE integration
     #[command(
@@ -346,6 +349,54 @@ fn read_diff_input(file: &Option<PathBuf>) -> Result<String> {
             Ok(input)
         }
     }
+}
+
+fn format_issues_for_copy(comments: &[ReviewComment]) -> String {
+    if comments.is_empty() {
+        return "No issues found.".to_string();
+    }
+
+    let mut output = String::new();
+    output.push_str("Issues to fix:\n\n");
+
+    for (i, c) in comments.iter().enumerate() {
+        let severity = match c.severity {
+            Severity::Bug => "BUG",
+            Severity::Warning => "WARNING",
+            Severity::Suggestion => "SUGGESTION",
+            Severity::Info => "INFO",
+        };
+
+        output.push_str(&format!(
+            "{}. [{}] {}:{}\n",
+            i + 1,
+            severity,
+            c.file_path.display(),
+            c.line
+        ));
+
+        // Handle multi-line message with proper indentation
+        for line in c.message.lines() {
+            output.push_str(&format!("   {}\n", line));
+        }
+
+        if let Some(suggestion) = &c.suggestion {
+            // Handle multi-line suggestion with proper indentation
+            for line in suggestion.lines() {
+                output.push_str(&format!("   Fix: {}\n", line));
+            }
+        }
+        if let Some(patch) = &c.patch {
+            output.push_str("   ```diff\n");
+            for line in patch.lines() {
+                output.push_str(&format!("   {}\n", line));
+            }
+            output.push_str("   ```\n");
+        }
+        output.push('\n');
+    }
+
+    output
 }
 
 #[derive(serde::Serialize)]
@@ -1091,6 +1142,7 @@ async fn main() -> Result<()> {
             no_self_reflection,
             incremental,
             ref base_sha,
+            copy,
         }) => {
             // Hint: suggest `argus init` when no config file exists
             if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
@@ -1248,6 +1300,13 @@ async fn main() -> Result<()> {
                     result.comments.len(),
                 );
                 eprintln!("--------------------");
+            }
+
+            // Handle --copy flag: output issues in AI-agent-friendly format
+            // Note: we don't return early so that apply_patches, post_comments,
+            // state saving, and --fail-on still run after output
+            if copy {
+                print!("{}", format_issues_for_copy(&result.comments));
             }
 
             match cli.format {
