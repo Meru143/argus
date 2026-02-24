@@ -409,7 +409,12 @@ fn format_review_metadata(result: &argus_review::pipeline::ReviewResult) -> Stri
     // For now, just output the basic metadata
     // Iterations and coverage tracking would require state persistence across reviews
     let comment_count = result.comments.len();
-    format!("Argus: reviewed ({} comments)", comment_count)
+    let word = if comment_count == 1 {
+        "comment"
+    } else {
+        "comments"
+    };
+    format!("Argus: reviewed ({} {word})", comment_count)
 }
 
 #[derive(serde::Serialize)]
