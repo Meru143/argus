@@ -1748,10 +1748,9 @@ async fn main() -> Result<()> {
             }
             println!("Feedback session complete. Thank you!");
         }
-        Some(Command::Hook { action, path }) => {
-            match action {
-                HookAction::Install => {
-                    let hook_content = r#"#!/bin/sh
+        Some(Command::Hook { action, path }) => match action {
+            HookAction::Install => {
+                let hook_content = r#"#!/bin/sh
 # Argus pre-commit hook
 # Runs Argus review on staged changes before commit
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
@@ -1783,28 +1782,28 @@ else
 fi
 "#;
 
-                    let hook_path = path.join(".git/hooks/pre-commit");
-                    if hook_path.exists() {
-                        miette::bail!("pre-commit hook already exists at {}. Remove it first or run 'argus hook uninstall' first.", hook_path.display());
-                    }
-                    std::fs::write(&hook_path, hook_content).into_diagnostic()?;
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755)).into_diagnostic()?;
-                    }
-                    println!("Installed pre-commit hook at {}", hook_path.display());
+                let hook_path = path.join(".git/hooks/pre-commit");
+                if hook_path.exists() {
+                    miette::bail!("pre-commit hook already exists at {}. Remove it first or run 'argus hook uninstall' first.", hook_path.display());
                 }
-                HookAction::Uninstall => {
-                    let hook_path = path.join(".git/hooks/pre-commit");
-                    if !hook_path.exists() {
-                        miette::bail!("pre-commit hook not found at {}", hook_path.display());
-                    }
-                    std::fs::remove_file(&hook_path).into_diagnostic()?;
-                    println!("Removed pre-commit hook from {}", hook_path.display());
+                std::fs::write(&hook_path, hook_content).into_diagnostic()?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755))
+                        .into_diagnostic()?;
                 }
+                println!("Installed pre-commit hook at {}", hook_path.display());
             }
-        }
+            HookAction::Uninstall => {
+                let hook_path = path.join(".git/hooks/pre-commit");
+                if !hook_path.exists() {
+                    miette::bail!("pre-commit hook not found at {}", hook_path.display());
+                }
+                std::fs::remove_file(&hook_path).into_diagnostic()?;
+                println!("Removed pre-commit hook from {}", hook_path.display());
+            }
+        },
         Some(Command::Init) => {
             let path = std::path::Path::new(".argus.toml");
             if path.exists() {
