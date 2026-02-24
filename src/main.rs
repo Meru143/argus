@@ -423,18 +423,6 @@ fn format_review_metadata(result: &argus_review::pipeline::ReviewResult) -> Stri
     format!("Argus: reviewed ({} {word})", comment_count)
 }
 
-fn format_vouch_metadata(result: &argus_review::pipeline::ReviewResult) -> String {
-    // For now, just output basic vouch metadata
-    // Iterations and coverage tracking would require state persistence across reviews
-    let comment_count = result.comments.len();
-    let word = if comment_count == 1 {
-        "comment"
-    } else {
-        "comments"
-    };
-    format!("Argus: vouched ({} {word})", comment_count)
-}
-
 #[derive(serde::Serialize)]
 struct CheckResult {
     name: &'static str,
@@ -1339,6 +1327,27 @@ async fn main() -> Result<()> {
 
             let diffs = argus_difflens::parser::parse_unified_diff(&diff_input)?;
 
+            // Handle --vouch early: skip AI review, take personal responsibility
+            // We still parse the diff to get comment count, but don't call LLM
+            if vouch {
+                // Create a mock result with zero comments for metadata
+                let comment_count = 0;
+                let word = if comment_count == 1 {
+                    "comment"
+                } else {
+                    "comments"
+                };
+                let metadata = format!("Argus: vouched ({} {word})", comment_count);
+                eprintln!("{metadata}");
+                return Ok(());
+            }
+
+            // Handle --skip early: skip review entirely
+            if skip {
+                eprintln!("Argus: skipped");
+                return Ok(());
+            }
+
             // Apply CLI overrides to review config
             let mut review_config = config.review.clone();
             if !skip_pattern.is_empty() {
@@ -1431,19 +1440,6 @@ async fn main() -> Result<()> {
             if print_metadata {
                 let metadata = format_review_metadata(&result);
                 eprintln!("{metadata}");
-            }
-
-            // Handle --vouch: skip AI review, take personal responsibility
-            if vouch {
-                let metadata = format_vouch_metadata(&result);
-                eprintln!("{metadata}");
-                return Ok(());
-            }
-
-            // Handle --skip: skip review entirely
-            if skip {
-                eprintln!("Argus: skipped");
-                return Ok(());
             }
 
             match cli.format {
