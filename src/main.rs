@@ -1182,6 +1182,20 @@ async fn main() -> Result<()> {
 
             let repo_root = repo.clone().unwrap_or_else(|| PathBuf::from("."));
 
+            // Handle --vouch early: skip AI review, take personal responsibility
+            // Do this BEFORE diff acquisition to avoid unnecessary work
+            if vouch {
+                eprintln!("Argus: vouched (0 comments)");
+                return Ok(());
+            }
+
+            // Handle --skip early: skip review entirely
+            // Do this BEFORE diff acquisition to avoid unnecessary work
+            if skip {
+                eprintln!("Argus: skipped");
+                return Ok(());
+            }
+
             // Determine diff input and current HEAD (for state saving)
             let (diff_input, current_head_sha) = if let Some(pr_ref) = pr {
                 let (owner, repo, pr_number) = argus_review::github::parse_pr_reference(pr_ref)?;
@@ -1326,27 +1340,6 @@ async fn main() -> Result<()> {
             }
 
             let diffs = argus_difflens::parser::parse_unified_diff(&diff_input)?;
-
-            // Handle --vouch early: skip AI review, take personal responsibility
-            // We still parse the diff to get comment count, but don't call LLM
-            if vouch {
-                // Create a mock result with zero comments for metadata
-                let comment_count = 0;
-                let word = if comment_count == 1 {
-                    "comment"
-                } else {
-                    "comments"
-                };
-                let metadata = format!("Argus: vouched ({} {word})", comment_count);
-                eprintln!("{metadata}");
-                return Ok(());
-            }
-
-            // Handle --skip early: skip review entirely
-            if skip {
-                eprintln!("Argus: skipped");
-                return Ok(());
-            }
 
             // Apply CLI overrides to review config
             let mut review_config = config.review.clone();
