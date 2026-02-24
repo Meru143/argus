@@ -1168,7 +1168,7 @@ async fn main() -> Result<()> {
             } else if let Some(commit_ref) = commit {
                 // Review already-committed changes
                 let diff_output = std::process::Command::new("git")
-                    .args(["-C", &repo_root.to_string_lossy(), "diff", &commit_ref])
+                    .args(["-C", &repo_root.to_string_lossy(), "diff", commit_ref])
                     .output()
                     .into_diagnostic()
                     .wrap_err(format!("Failed to run git diff {}", commit_ref))?;
