@@ -12,7 +12,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.4.0"
+version = "0.4.1"
 license = "MIT"
 description = "AI code review platform — your coding agent shouldn't grade its own homework"
 repository = "https://github.com/Meru143/argus"
@@ -32,13 +32,13 @@ targets = [
 ]
 
 [workspace.dependencies]
-argus-core = { path = "crates/argus-core", version = "0.4.0" }
-argus-repomap = { path = "crates/argus-repomap", version = "0.4.0" }
-argus-difflens = { path = "crates/argus-difflens", version = "0.4.0" }
-argus-codelens = { path = "crates/argus-codelens", version = "0.4.0" }
-argus-gitpulse = { path = "crates/argus-gitpulse", version = "0.4.0" }
-argus-review = { path = "crates/argus-review", version = "0.4.0" }
-argus-mcp = { path = "crates/argus-mcp", version = "0.4.0" }
+argus-core = { path = "crates/argus-core", version = "0.4.1" }
+argus-repomap = { path = "crates/argus-repomap", version = "0.4.1" }
+argus-difflens = { path = "crates/argus-difflens", version = "0.4.1" }
+argus-codelens = { path = "crates/argus-codelens", version = "0.4.1" }
+argus-gitpulse = { path = "crates/argus-gitpulse", version = "0.4.1" }
+argus-review = { path = "crates/argus-review", version = "0.4.1" }
+argus-mcp = { path = "crates/argus-mcp", version = "0.4.1" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

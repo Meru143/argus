@@ -2,6 +2,26 @@
 
 All notable changes to Argus are documented here.
 
+## [0.4.1](https://github.com/Meru143/argus/compare/argus-ai-v0.4.0...argus-ai-v0.4.1) - 2026-02-24
+
+### Added
+
+- add git hook install/uninstall commands ([#48](https://github.com/Meru143/argus/pull/48))
+- *(review)* add --vouch and --skip flags ([#45](https://github.com/Meru143/argus/pull/45))
+- *(review)* add --print-metadata flag for commit messages ([#42](https://github.com/Meru143/argus/pull/42))
+- *(review)* add --commit flag to review already-committed changes ([#40](https://github.com/Meru143/argus/pull/40))
+- *(review)* add --copy flag for AI-agent-friendly output ([#37](https://github.com/Meru143/argus/pull/37))
+
+### Fixed
+
+- hook improvements ([#50](https://github.com/Meru143/argus/pull/50))
+- hook feedback improvements ([#49](https://github.com/Meru143/argus/pull/49))
+- move vouch/skip checks before diff acquisition ([#47](https://github.com/Meru143/argus/pull/47))
+- move vouch/skip checks earlier ([#46](https://github.com/Meru143/argus/pull/46))
+- use singular comment when count is 1 ([#44](https://github.com/Meru143/argus/pull/44))
+- address code review feedback ([#43](https://github.com/Meru143/argus/pull/43))
+- *(review)* address code review feedback ([#41](https://github.com/Meru143/argus/pull/41))
+
 ## [0.4.0](https://github.com/Meru143/argus/compare/argus-ai-v0.3.2...argus-ai-v0.4.0) - 2026-02-17
 
 ### Added
