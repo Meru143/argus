@@ -464,11 +464,16 @@ diff --git a/f.rs b/f.rs
         assert!(content.contains("+new"));
     }
 
-
     #[test]
     fn parse_path_handles_quoted_paths() {
-        assert_eq!(parse_path("\"a/src/my file.rs\""), PathBuf::from("src/my file.rs"));
-        assert_eq!(parse_path("\"b/src/my file.rs\""), PathBuf::from("src/my file.rs"));
+        assert_eq!(
+            parse_path("\"a/src/my file.rs\""),
+            PathBuf::from("src/my file.rs")
+        );
+        assert_eq!(
+            parse_path("\"b/src/my file.rs\""),
+            PathBuf::from("src/my file.rs")
+        );
     }
 
     #[test]

@@ -17,7 +17,6 @@ fn parse_patch_without_git_header() {
     assert!(files[0].is_new_file || files[0].hunks[0].change_type == argus_core::ChangeType::Add);
 }
 
-
 #[test]
 fn parse_patch_with_quoted_paths() {
     let diff = include_str!("fixtures/quoted_paths.diff");
