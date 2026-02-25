@@ -1,8 +1,8 @@
 use argus_core::Severity;
 
 #[test]
-fn fail_on_exits_zero_when_no_matching_severity() {
-    // Simulate: only Suggestion-level findings, threshold is Bug
+fn meets_threshold_is_false_when_no_severity_matches() {
+    // In-memory threshold check: only Suggestion/Info findings, threshold is Bug
     let comments = vec![Severity::Suggestion, Severity::Info];
     let threshold = Severity::Bug;
 
@@ -11,8 +11,8 @@ fn fail_on_exits_zero_when_no_matching_severity() {
 }
 
 #[test]
-fn fail_on_exits_one_when_matching_severity_found() {
-    // Simulate: Bug finding present, threshold is Warning
+fn meets_threshold_is_true_when_higher_severity_is_present() {
+    // In-memory threshold check: Bug finding present, threshold is Warning
     let comments = vec![Severity::Bug, Severity::Suggestion];
     let threshold = Severity::Warning;
 

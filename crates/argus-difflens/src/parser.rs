@@ -139,7 +139,7 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileDiff>, ArgusError> {
 
         if let Some(path) = line.strip_prefix("+++ ") {
             file.new_path = parse_path(path);
-            if path == "/dev/null" {
+            if file.new_path == std::path::Path::new("/dev/null") {
                 file.is_deleted_file = true;
             }
             continue;
@@ -205,13 +205,17 @@ fn flush_hunk(current: &mut Option<FileDiff>, hunk: &mut Option<DiffHunk>) {
 }
 
 fn parse_path(raw: &str) -> PathBuf {
-    if raw == "/dev/null" {
+    let normalized = raw.trim_matches('"');
+
+    if normalized == "/dev/null" {
         return PathBuf::from("/dev/null");
     }
-    let stripped = raw
+
+    let stripped = normalized
         .strip_prefix("a/")
-        .or_else(|| raw.strip_prefix("b/"))
-        .unwrap_or(raw);
+        .or_else(|| normalized.strip_prefix("b/"))
+        .unwrap_or(normalized);
+
     PathBuf::from(stripped)
 }
 
@@ -458,6 +462,34 @@ diff --git a/f.rs b/f.rs
         assert!(!content.contains("No newline"));
         assert!(content.contains("-old"));
         assert!(content.contains("+new"));
+    }
+
+    #[test]
+    fn parse_path_handles_quoted_paths() {
+        assert_eq!(
+            parse_path("\"a/src/my file.rs\""),
+            PathBuf::from("src/my file.rs")
+        );
+        assert_eq!(
+            parse_path("\"b/src/my file.rs\""),
+            PathBuf::from("src/my file.rs")
+        );
+    }
+
+    #[test]
+    fn quoted_paths_are_parsed_in_unified_diff() {
+        let diff = r#"--- "a/src/my file.rs"
++++ "b/src/my file.rs"
+@@ -1 +1,2 @@
+ old
++new
+"#;
+
+        let files = parse_unified_diff(diff).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].old_path, PathBuf::from("src/my file.rs"));
+        assert_eq!(files[0].new_path, PathBuf::from("src/my file.rs"));
+        assert_eq!(files[0].hunks[0].file_path, PathBuf::from("src/my file.rs"));
     }
 
     #[test]
