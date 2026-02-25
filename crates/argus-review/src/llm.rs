@@ -80,6 +80,8 @@ pub struct LlmClient {
     base_url: Option<String>,
 }
 
+const MAX_ERROR_REASON_CHARS: usize = 320;
+
 impl std::fmt::Debug for LlmClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LlmClient")
@@ -223,8 +225,11 @@ impl LlmClient {
 
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            return Err(ArgusError::Llm(format!(
-                "OpenAI API error {status}: {body_text}"
+            return Err(ArgusError::Llm(sanitize_provider_error(
+                "OpenAI",
+                status,
+                &body_text,
+                &[],
             )));
         }
 
@@ -323,20 +328,11 @@ impl LlmClient {
 
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            // Try to extract Anthropic's structured error message
-            if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(&body_text) {
-                if let Some(msg) = err_json
-                    .get("error")
-                    .and_then(|e| e.get("message"))
-                    .and_then(|m| m.as_str())
-                {
-                    return Err(ArgusError::Llm(format!(
-                        "Anthropic API error {status}: {msg}"
-                    )));
-                }
-            }
-            return Err(ArgusError::Llm(format!(
-                "Anthropic API error {status}: {body_text}"
+            return Err(ArgusError::Llm(sanitize_provider_error(
+                "Anthropic",
+                status,
+                &body_text,
+                &[],
             )));
         }
 
@@ -456,19 +452,11 @@ impl LlmClient {
 
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(&body_text) {
-                if let Some(msg) = err_json
-                    .get("error")
-                    .and_then(|e| e.get("message"))
-                    .and_then(|m| m.as_str())
-                {
-                    return Err(ArgusError::Llm(redact(format!(
-                        "Gemini API error {status}: {msg}"
-                    ))));
-                }
-            }
-            return Err(ArgusError::Llm(redact(format!(
-                "Gemini API error {status}: {body_text}"
+            return Err(ArgusError::Llm(redact(sanitize_provider_error(
+                "Gemini",
+                status,
+                &body_text,
+                &[api_key],
             ))));
         }
 
@@ -518,8 +506,11 @@ impl LlmClient {
         let status = response.status();
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
-            return Err(ArgusError::Llm(format!(
-                "Ollama API error {status}: {body_text}"
+            return Err(ArgusError::Llm(sanitize_provider_error(
+                "Ollama",
+                status,
+                &body_text,
+                &[],
             )));
         }
 
@@ -540,6 +531,127 @@ impl LlmClient {
 
         Ok(content.to_string())
     }
+}
+
+fn sanitize_provider_error(
+    provider: &str,
+    status: reqwest::StatusCode,
+    body_text: &str,
+    extra_redactions: &[&str],
+) -> String {
+    let raw_reason = extract_error_reason(body_text).unwrap_or_else(|| {
+        status
+            .canonical_reason()
+            .unwrap_or("request failed")
+            .to_string()
+    });
+    let sanitized_reason = sanitize_error_reason(&raw_reason, extra_redactions);
+    format!("{provider} API error {status}: {sanitized_reason}")
+}
+
+fn extract_error_reason(body_text: &str) -> Option<String> {
+    if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(body_text) {
+        let candidates = [
+            err_json
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str()),
+            err_json.get("message").and_then(|m| m.as_str()),
+            err_json.get("detail").and_then(|m| m.as_str()),
+        ];
+        if let Some(msg) = candidates
+            .into_iter()
+            .flatten()
+            .find(|msg| !msg.trim().is_empty())
+        {
+            return Some(msg.trim().to_string());
+        }
+    }
+
+    let line = body_text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+    Some(line.to_string())
+}
+
+fn sanitize_error_reason(reason: &str, extra_redactions: &[&str]) -> String {
+    let mut sanitized = reason.trim().to_string();
+    for token in extra_redactions {
+        if !token.is_empty() {
+            sanitized = sanitized.replace(token, "[REDACTED]");
+        }
+    }
+    sanitized = redact_token_like_strings(&sanitized);
+    truncate_with_ellipsis(sanitized, MAX_ERROR_REASON_CHARS)
+}
+
+fn redact_token_like_strings(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut current = String::new();
+
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            current.push(ch);
+            continue;
+        }
+
+        if !current.is_empty() {
+            if looks_like_secret(&current) {
+                output.push_str("[REDACTED_TOKEN]");
+            } else {
+                output.push_str(&current);
+            }
+            current.clear();
+        }
+        output.push(ch);
+    }
+
+    if !current.is_empty() {
+        if looks_like_secret(&current) {
+            output.push_str("[REDACTED_TOKEN]");
+        } else {
+            output.push_str(&current);
+        }
+    }
+
+    output
+}
+
+fn looks_like_secret(token: &str) -> bool {
+    if token.starts_with("sk-") && token.len() >= 12 {
+        return true;
+    }
+
+    let has_alpha = token.chars().any(|c| c.is_ascii_alphabetic());
+    let has_digit = token.chars().any(|c| c.is_ascii_digit());
+    if token.len() >= 24 && has_alpha && has_digit {
+        return true;
+    }
+
+    if token.contains('.') {
+        let segments: Vec<&str> = token.split('.').collect();
+        if segments.len() >= 3
+            && segments.iter().all(|segment| segment.len() >= 8)
+            && token.len() >= 24
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn truncate_with_ellipsis(input: String, max_chars: usize) -> String {
+    let char_count = input.chars().count();
+    if char_count <= max_chars {
+        return input;
+    }
+
+    let keep = max_chars.saturating_sub(1);
+    let mut truncated = input.chars().take(keep).collect::<String>();
+    truncated.push('…');
+    truncated
 }
 
 /// Merge consecutive messages with the same role into single messages.
@@ -1080,5 +1192,47 @@ mod tests {
             .unwrap();
 
         assert_eq!(content, "{\"comments\":[]}");
+    }
+
+    #[test]
+    fn sanitize_provider_error_redacts_token_like_values() {
+        let body = r#"{"error":{"message":"Invalid token sk-1234567890abcdefghijkl and bearer abcdefghijklmnop12345678"}}"#;
+
+        let sanitized =
+            sanitize_provider_error("OpenAI", reqwest::StatusCode::UNAUTHORIZED, body, &[]);
+
+        assert!(sanitized.contains("OpenAI API error 401 Unauthorized"));
+        assert!(sanitized.contains("[REDACTED_TOKEN]"));
+        assert!(!sanitized.contains("sk-1234567890abcdefghijkl"));
+        assert!(!sanitized.contains("abcdefghijklmnop12345678"));
+    }
+
+    #[test]
+    fn sanitize_provider_error_truncates_long_reason() {
+        let long_body = "x".repeat(MAX_ERROR_REASON_CHARS + 100);
+
+        let sanitized =
+            sanitize_provider_error("Ollama", reqwest::StatusCode::BAD_REQUEST, &long_body, &[]);
+
+        let prefix = "Ollama API error 400 Bad Request: ";
+        let reason = sanitized.strip_prefix(prefix).unwrap();
+        assert_eq!(reason.chars().count(), MAX_ERROR_REASON_CHARS);
+        assert!(reason.ends_with('…'));
+    }
+
+    #[test]
+    fn sanitize_provider_error_applies_extra_redactions() {
+        let api_key = "AIzaVerySensitiveKey123456789";
+        let body = format!("{{\"message\":\"request failed for key {api_key}\"}}");
+
+        let sanitized = sanitize_provider_error(
+            "Gemini",
+            reqwest::StatusCode::BAD_REQUEST,
+            &body,
+            &[api_key],
+        );
+
+        assert!(sanitized.contains("[REDACTED]"));
+        assert!(!sanitized.contains(api_key));
     }
 }
