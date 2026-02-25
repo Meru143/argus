@@ -35,6 +35,7 @@ use crate::prompt;
 ///         skipped_files: vec![],
 ///         model_used: "gpt-4o".into(),
 ///         llm_calls: 0,
+///         llm_retries: 0,
 ///         file_groups: vec![],
 ///         hotspot_files: 0,
 ///     },
@@ -107,6 +108,7 @@ pub struct FilteredComment {
 ///     skipped_files: vec![],
 ///     model_used: "gpt-4o".into(),
 ///     llm_calls: 2,
+///     llm_retries: 0,
 ///     file_groups: vec![],
 ///     hotspot_files: 0,
 /// };
@@ -136,6 +138,8 @@ pub struct ReviewStats {
     pub model_used: String,
     /// Number of LLM API calls made.
     pub llm_calls: usize,
+    /// Number of additional LLM retries after 429/rate-limit responses.
+    pub llm_retries: usize,
     /// Cross-file groups used during review (for verbose output).
     #[serde(skip)]
     pub file_groups: Vec<Vec<String>>,
@@ -204,6 +208,7 @@ impl ReviewPipeline {
                     skipped_files,
                     model_used: self.llm.model().to_string(),
                     llm_calls: 0,
+                    llm_retries: 0,
                     file_groups: vec![],
                     hotspot_files: 0,
                 },
@@ -294,6 +299,7 @@ impl ReviewPipeline {
         let system = prompt::build_system_prompt(&self.config, &self.rules, &negative_examples);
         let mut all_comments = Vec::new();
         let mut llm_calls: usize = 0;
+        let mut llm_retries: usize = 0;
         let mut file_groups: Vec<Vec<String>> = Vec::new();
 
         if total_tokens > self.config.max_diff_tokens && kept_diffs.len() > 1 {
@@ -336,11 +342,6 @@ impl ReviewPipeline {
             };
 
             for (i, group) in groups.iter().enumerate() {
-                // Add a significant delay between groups to avoid hitting free-tier rate limits (20 RPM)
-                if i > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
-                }
-
                 let group_pb = if is_tty {
                     let label = group_display_name(group.as_slice());
                     let pb = mp.add(ProgressBar::new_spinner());
@@ -378,8 +379,9 @@ impl ReviewPipeline {
                     },
                 ];
 
-                let response = self.llm.chat(messages).await?;
-                llm_calls += 1;
+                let response = self
+                    .chat_with_rate_limit_retries(messages, &mut llm_calls, &mut llm_retries)
+                    .await?;
                 let mut parsed = prompt::parse_review_response(&response)?;
 
                 if let Some(pb) = &group_pb {
@@ -446,8 +448,9 @@ impl ReviewPipeline {
                 },
             ];
 
-            let response = self.llm.chat(messages).await?;
-            llm_calls = 1;
+            let response = self
+                .chat_with_rate_limit_retries(messages, &mut llm_calls, &mut llm_retries)
+                .await?;
             all_comments = prompt::parse_review_response(&response)?;
             if let Some(pb) = spinner {
                 pb.finish_with_message(format!(
@@ -471,7 +474,7 @@ impl ReviewPipeline {
             if self.config.self_reflection && !deduped.is_empty() {
                 let spinner = make_spinner("Self-reflecting on comments...");
                 match self
-                    .self_reflect(&deduped, &diff_text, &mut llm_calls)
+                    .self_reflect(&deduped, &diff_text, &mut llm_calls, &mut llm_retries)
                     .await
                 {
                     Ok((kept, removed_count)) => {
@@ -521,9 +524,11 @@ impl ReviewPipeline {
                     content: prompt::build_summary_prompt(&final_comments, &diff_text),
                 },
             ];
-            match self.llm.chat(summary_messages).await {
+            match self
+                .chat_with_rate_limit_retries(summary_messages, &mut llm_calls, &mut llm_retries)
+                .await
+            {
                 Ok(text) => {
-                    llm_calls += 1;
                     if let Some(pb) = spinner {
                         pb.finish_with_message("Summary generated");
                     }
@@ -555,6 +560,7 @@ impl ReviewPipeline {
                 skipped_files,
                 model_used: self.llm.model().to_string(),
                 llm_calls,
+                llm_retries,
                 file_groups,
                 hotspot_files: hotspot_file_count,
             },
@@ -571,6 +577,7 @@ impl ReviewPipeline {
         comments: &[ReviewComment],
         diff_text: &str,
         llm_calls: &mut usize,
+        llm_retries: &mut usize,
     ) -> Result<(Vec<ReviewComment>, usize), ArgusError> {
         let reflection_prompt = prompt::build_self_reflection_prompt(comments, diff_text);
         let messages = vec![
@@ -586,8 +593,9 @@ impl ReviewPipeline {
             },
         ];
 
-        let response = self.llm.chat(messages).await?;
-        *llm_calls += 1;
+        let response = self
+            .chat_with_rate_limit_retries(messages, llm_calls, llm_retries)
+            .await?;
 
         let evaluations = prompt::parse_self_reflection_response(&response)?;
 
@@ -617,6 +625,41 @@ impl ReviewPipeline {
         }
 
         Ok((kept, removed))
+    }
+
+    async fn chat_with_rate_limit_retries(
+        &self,
+        messages: Vec<ChatMessage>,
+        llm_calls: &mut usize,
+        llm_retries: &mut usize,
+    ) -> Result<String, ArgusError> {
+        const MAX_RETRIES: u32 = 3;
+        const INITIAL_BACKOFF_MS: u64 = 1000;
+
+        let mut attempt: u32 = 0;
+        loop {
+            *llm_calls += 1;
+            match self.llm.chat(messages.clone()).await {
+                Ok(response) => return Ok(response),
+                Err(err) if is_rate_limit_error(&err) && attempt < MAX_RETRIES => {
+                    *llm_retries += 1;
+                    let backoff_ms = INITIAL_BACKOFF_MS * (1_u64 << attempt);
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                    attempt += 1;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+}
+
+fn is_rate_limit_error(err: &ArgusError) -> bool {
+    match err {
+        ArgusError::Llm(message) => {
+            let lower = message.to_ascii_lowercase();
+            lower.contains("429") || lower.contains("too many requests")
+        }
+        _ => false,
     }
 }
 
@@ -1048,7 +1091,7 @@ impl fmt::Display for ReviewResult {
         writeln!(f, "==============")?;
         writeln!(
             f,
-            "Model: {} | Files: {} (skipped: {}) | Hunks: {} | Comments: {} (filtered: {}, deduped: {}, reflected: {}) | LLM calls: {}\n",
+            "Model: {} | Files: {} (skipped: {}) | Hunks: {} | Comments: {} (filtered: {}, deduped: {}, reflected: {}) | LLM calls: {} (retries: {})\n",
             self.stats.model_used,
             self.stats.files_reviewed,
             self.stats.files_skipped,
@@ -1058,6 +1101,7 @@ impl fmt::Display for ReviewResult {
             self.stats.comments_deduplicated,
             self.stats.comments_reflected_out,
             self.stats.llm_calls,
+            self.stats.llm_retries,
         )?;
 
         if self.stats.hotspot_files > 0 {
@@ -1153,6 +1197,7 @@ impl ReviewResult {
     ///         skipped_files: vec![],
     ///         model_used: "gpt-4o".into(),
     ///         llm_calls: 0,
+    ///         llm_retries: 0,
     ///         file_groups: vec![],
     ///         hotspot_files: 0,
     ///     },
@@ -1164,7 +1209,7 @@ impl ReviewResult {
         let mut out = String::new();
         out.push_str("# Review Results\n\n");
         out.push_str(&format!(
-            "**Model:** {} | **Files:** {} (skipped: {}) | **Hunks:** {} | **Comments:** {} (filtered: {}, deduped: {}, reflected: {}) | **LLM calls:** {}\n\n",
+            "**Model:** {} | **Files:** {} (skipped: {}) | **Hunks:** {} | **Comments:** {} (filtered: {}, deduped: {}, reflected: {}) | **LLM calls:** {} (retries: {})\n\n",
             self.stats.model_used,
             self.stats.files_reviewed,
             self.stats.files_skipped,
@@ -1174,6 +1219,7 @@ impl ReviewResult {
             self.stats.comments_deduplicated,
             self.stats.comments_reflected_out,
             self.stats.llm_calls,
+            self.stats.llm_retries,
         ));
 
         if let Some(summary) = &self.summary {
@@ -1421,6 +1467,7 @@ mod tests {
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 1,
+                llm_retries: 0,
                 file_groups: vec![],
                 hotspot_files: 0,
             },
@@ -1650,6 +1697,7 @@ mod tests {
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 2,
+                llm_retries: 0,
                 file_groups: vec![],
                 hotspot_files: 0,
             },
@@ -1675,6 +1723,7 @@ mod tests {
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 0,
+                llm_retries: 0,
                 file_groups: vec![],
                 hotspot_files: 0,
             },
@@ -1709,6 +1758,7 @@ mod tests {
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 2,
+                llm_retries: 0,
                 file_groups: vec![],
                 hotspot_files: 0,
             },
@@ -1743,6 +1793,7 @@ mod tests {
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 1,
+                llm_retries: 0,
                 file_groups: vec![],
                 hotspot_files: 0,
             },
@@ -1779,11 +1830,28 @@ mod tests {
                 skipped_files: vec![],
                 model_used: "test".into(),
                 llm_calls: 1,
+                llm_retries: 0,
                 file_groups: vec![],
                 hotspot_files: 0,
             },
         };
         let md = result.to_markdown();
         assert!(md.contains("```\nlet x = safe_call();\n```"));
+    }
+
+    #[test]
+    fn detects_rate_limit_like_errors() {
+        assert!(is_rate_limit_error(&ArgusError::Llm(
+            "OpenAI API error 429 Too Many Requests".into(),
+        )));
+        assert!(is_rate_limit_error(&ArgusError::Llm(
+            "rate LIMIT: too many requests, retry later".into(),
+        )));
+        assert!(!is_rate_limit_error(&ArgusError::Llm(
+            "provider timeout".into(),
+        )));
+        assert!(!is_rate_limit_error(&ArgusError::Git(
+            "not an llm error".into(),
+        )));
     }
 }
