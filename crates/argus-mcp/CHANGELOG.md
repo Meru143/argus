@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/Meru143/argus/compare/argus-mcp-v0.4.1...argus-mcp-v0.5.0) - 2026-02-25
+
+### Other
+
+- Harden MCP tool path resolution ([#54](https://github.com/Meru143/argus/pull/54))
+
 ## [0.3.0](https://github.com/Meru143/argus/compare/argus-mcp-v0.2.2...argus-mcp-v0.3.0) - 2026-02-16
 
 ### Fixed

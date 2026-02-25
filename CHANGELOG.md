@@ -2,6 +2,13 @@
 
 All notable changes to Argus are documented here.
 
+## [0.5.0](https://github.com/Meru143/argus/compare/argus-ai-v0.4.1...argus-ai-v0.5.0) - 2026-02-25
+
+### Other
+
+- add quoted-path diff fixture regression coverage
+- add codebase audit follow-up tasks
+
 ## [0.4.1](https://github.com/Meru143/argus/compare/argus-ai-v0.4.0...argus-ai-v0.4.1) - 2026-02-24
 
 ### Added
