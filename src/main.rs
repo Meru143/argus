@@ -432,16 +432,57 @@ fn format_issues_for_copy(comments: &[ReviewComment]) -> String {
     output
 }
 
-fn format_review_metadata(result: &argus_review::pipeline::ReviewResult) -> String {
-    // For now, just output the basic metadata
-    // Iterations and coverage tracking would require state persistence across reviews
+fn format_review_metadata(
+    result: &argus_review::pipeline::ReviewResult,
+    iteration: Option<i32>,
+) -> String {
     let comment_count = result.comments.len();
     let word = if comment_count == 1 {
         "comment"
     } else {
         "comments"
     };
-    format!("Argus: reviewed ({} {word})", comment_count)
+
+    if let Some(iter) = iteration {
+        format!(
+            "Argus: reviewed ({} {word}, iteration {})",
+            comment_count, iter
+        )
+    } else {
+        format!("Argus: reviewed ({} {word})", comment_count)
+    }
+}
+
+/// Increment iteration count for a commit and return the new count
+fn increment_iteration(
+    db_path: &std::path::Path,
+    commit_sha: &str,
+) -> Result<i32, rusqlite::Error> {
+    let conn = rusqlite::Connection::open(db_path)?;
+
+    // Create table if not exists
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS review_iterations (
+            commit_sha TEXT PRIMARY KEY,
+            iteration_count INTEGER NOT NULL DEFAULT 1,
+            last_reviewed TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    // Increment or insert
+    let new_count = conn.query_row(
+        "INSERT INTO review_iterations (commit_sha, iteration_count, last_reviewed)
+         VALUES (?1, 1, datetime('now'))
+         ON CONFLICT(commit_sha) DO UPDATE SET
+         iteration_count = iteration_count + 1,
+         last_reviewed = datetime('now')
+         RETURNING iteration_count",
+        [commit_sha],
+        |row| row.get(0),
+    )?;
+
+    Ok(new_count)
 }
 
 #[derive(serde::Serialize)]
@@ -1406,6 +1447,20 @@ async fn main() -> Result<()> {
             );
             let result = pipeline.review(&diffs, repo.as_deref()).await?;
 
+            // Track iteration count for this commit
+            let iteration = if let Some(ref commit_sha) = current_head_sha {
+                let db_path = repo_root.join(".argus/iterations.db");
+                match increment_iteration(&db_path, commit_sha) {
+                    Ok(count) => Some(count),
+                    Err(e) => {
+                        eprintln!("Warning: could not track iteration: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             // Verbose output
             if cli.verbose {
                 eprintln!("--- Review Stats ---");
@@ -1452,7 +1507,7 @@ async fn main() -> Result<()> {
 
             // Handle --print-metadata flag: output metadata for commit messages
             if print_metadata {
-                let metadata = format_review_metadata(&result);
+                let metadata = format_review_metadata(&result, iteration);
                 eprintln!("{metadata}");
             }
 
