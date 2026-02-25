@@ -493,7 +493,6 @@ impl CodeIndex {
             .map_err(|e| ArgusError::Database(format!("failed to prepare query: {e}")))?;
 
         let mut top_hits: BinaryHeap<Reverse<ScoredChunk>> = BinaryHeap::with_capacity(limit);
-        let mut ordinal = 0usize;
 
         let rows = stmt
             .query_map([], |row| {
@@ -517,7 +516,7 @@ impl CodeIndex {
             })
             .map_err(|e| ArgusError::Database(format!("failed to query chunks: {e}")))?;
 
-        for row in rows {
+        for (ordinal, row) in rows.enumerate() {
             let (score, chunk) =
                 row.map_err(|e| ArgusError::Database(format!("failed to read row: {e}")))?;
             push_top_k(
@@ -529,7 +528,6 @@ impl CodeIndex {
                 },
                 limit,
             );
-            ordinal += 1;
         }
 
         let mut scored = top_hits
@@ -1132,7 +1130,7 @@ mod tests {
 
     #[test]
     fn floats_bytes_roundtrip() {
-        let original = vec![1.0f32, -2.5, 0.0, 3.14];
+        let original = vec![1.0f32, -2.5, 0.0, std::f32::consts::PI];
         let bytes = floats_to_bytes(&original);
         let recovered = bytes_to_floats(&bytes);
         assert_eq!(original, recovered);
