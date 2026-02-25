@@ -432,25 +432,34 @@ fn format_issues_for_copy(comments: &[ReviewComment]) -> String {
     output
 }
 
-fn format_review_metadata(result: &argus_review::pipeline::ReviewResult, iteration: Option<i32>) -> String {
+fn format_review_metadata(
+    result: &argus_review::pipeline::ReviewResult,
+    iteration: Option<i32>,
+) -> String {
     let comment_count = result.comments.len();
     let word = if comment_count == 1 {
         "comment"
     } else {
         "comments"
     };
-    
+
     if let Some(iter) = iteration {
-        format!("Argus: reviewed ({} {word}, iteration {})", comment_count, iter)
+        format!(
+            "Argus: reviewed ({} {word}, iteration {})",
+            comment_count, iter
+        )
     } else {
         format!("Argus: reviewed ({} {word})", comment_count)
     }
 }
 
 /// Increment iteration count for a commit and return the new count
-fn increment_iteration(db_path: &std::path::Path, commit_sha: &str) -> Result<i32, rusqlite::Error> {
+fn increment_iteration(
+    db_path: &std::path::Path,
+    commit_sha: &str,
+) -> Result<i32, rusqlite::Error> {
     let conn = rusqlite::Connection::open(db_path)?;
-    
+
     // Create table if not exists
     conn.execute(
         "CREATE TABLE IF NOT EXISTS review_iterations (
@@ -460,7 +469,7 @@ fn increment_iteration(db_path: &std::path::Path, commit_sha: &str) -> Result<i3
         )",
         [],
     )?;
-    
+
     // Increment or insert
     let new_count = conn.query_row(
         "INSERT INTO review_iterations (commit_sha, iteration_count, last_reviewed)
@@ -472,7 +481,7 @@ fn increment_iteration(db_path: &std::path::Path, commit_sha: &str) -> Result<i3
         [commit_sha],
         |row| row.get(0),
     )?;
-    
+
     Ok(new_count)
 }
 
