@@ -3,7 +3,11 @@
 //! Stores chunks in SQLite with FTS5 for keyword search and BLOBs for
 //! vector embeddings. Cosine similarity is computed in Rust for vector search.
 
-use std::path::{Path, PathBuf};
+use std::{
+    cmp::{Ordering, Reverse},
+    collections::BinaryHeap,
+    path::{Path, PathBuf},
+};
 
 use argus_core::ArgusError;
 use rusqlite::{params, Connection};
@@ -123,6 +127,53 @@ pub struct Feedback {
 /// ```
 pub struct CodeIndex {
     conn: Connection,
+}
+
+#[derive(Debug)]
+struct ScoredChunk {
+    score: f64,
+    ordinal: usize,
+    chunk: CodeChunk,
+}
+
+impl PartialEq for ScoredChunk {
+    fn eq(&self, other: &Self) -> bool {
+        self.score.total_cmp(&other.score) == Ordering::Equal && self.ordinal == other.ordinal
+    }
+}
+
+impl Eq for ScoredChunk {}
+
+impl PartialOrd for ScoredChunk {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ScoredChunk {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.score
+            .total_cmp(&other.score)
+            .then_with(|| self.ordinal.cmp(&other.ordinal))
+    }
+}
+
+fn push_top_k(heap: &mut BinaryHeap<Reverse<ScoredChunk>>, candidate: ScoredChunk, limit: usize) {
+    if limit == 0 {
+        return;
+    }
+
+    if heap.len() < limit {
+        heap.push(Reverse(candidate));
+        return;
+    }
+
+    if let Some(worst) = heap.peek() {
+        if candidate > worst.0 {
+            heap.pop();
+            heap.push(Reverse(candidate));
+        }
+    }
 }
 
 impl CodeIndex {
@@ -428,6 +479,10 @@ impl CodeIndex {
         query_embedding: &[f32],
         limit: usize,
     ) -> Result<Vec<SearchHit>, ArgusError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let mut stmt = self
             .conn
             .prepare(
@@ -437,7 +492,7 @@ impl CodeIndex {
             )
             .map_err(|e| ArgusError::Database(format!("failed to prepare query: {e}")))?;
 
-        let mut scored: Vec<(f64, CodeChunk)> = Vec::new();
+        let mut top_hits: BinaryHeap<Reverse<ScoredChunk>> = BinaryHeap::with_capacity(limit);
 
         let rows = stmt
             .query_map([], |row| {
@@ -461,20 +516,36 @@ impl CodeIndex {
             })
             .map_err(|e| ArgusError::Database(format!("failed to query chunks: {e}")))?;
 
-        for row in rows {
+        for (ordinal, row) in rows.enumerate() {
             let (score, chunk) =
                 row.map_err(|e| ArgusError::Database(format!("failed to read row: {e}")))?;
-            scored.push((score, chunk));
+            push_top_k(
+                &mut top_hits,
+                ScoredChunk {
+                    score,
+                    ordinal,
+                    chunk,
+                },
+                limit,
+            );
         }
 
-        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(limit);
+        let mut scored = top_hits
+            .into_iter()
+            .map(|Reverse(item)| item)
+            .collect::<Vec<_>>();
+
+        scored.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.ordinal.cmp(&b.ordinal))
+        });
 
         let hits = scored
             .into_iter()
-            .map(|(score, chunk)| SearchHit {
-                chunk,
-                score,
+            .map(|item| SearchHit {
+                chunk: item.chunk,
+                score: item.score,
                 source: SearchSource::Vector,
             })
             .collect();
@@ -923,6 +994,60 @@ mod tests {
     }
 
     #[test]
+    fn vector_search_large_input_matches_full_sort_expectation() {
+        let index = CodeIndex::in_memory().unwrap();
+        index
+            .record_file(Path::new("src/main.rs"), "file_hash")
+            .unwrap();
+
+        let total_rows = 20_000usize;
+        let limit = 50usize;
+        let mut expected = Vec::with_capacity(total_rows);
+
+        for i in 0..total_rows {
+            let name = format!("func_{i:05}");
+            let chunk = sample_chunk(&name, "fn f() {}");
+            let embedding = vec![1.0f32, i as f32 * 0.001f32, 0.25f32];
+            let score = cosine_similarity(&[1.0, 0.0, 0.25], &embedding);
+            expected.push((score, i, name.clone()));
+
+            index.insert_chunk(&chunk, &embedding).unwrap();
+        }
+
+        let actual = index.vector_search(&[1.0, 0.0, 0.25], limit).unwrap();
+
+        expected.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        expected.truncate(limit);
+
+        assert_eq!(actual.len(), limit);
+        for (hit, (expected_score, _, expected_name)) in actual.iter().zip(expected.iter()) {
+            assert_eq!(&hit.chunk.entity_name, expected_name);
+            assert!((hit.score - expected_score).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn push_top_k_keeps_heap_bounded() {
+        let limit = 8usize;
+        let mut heap = BinaryHeap::with_capacity(limit);
+
+        for i in 0..100_000usize {
+            push_top_k(
+                &mut heap,
+                ScoredChunk {
+                    score: i as f64,
+                    ordinal: i,
+                    chunk: sample_chunk("main", "fn main() {}"),
+                },
+                limit,
+            );
+            assert!(heap.len() <= limit);
+        }
+
+        assert_eq!(heap.len(), limit);
+    }
+
+    #[test]
     fn keyword_search_finds_by_name() {
         let index = CodeIndex::in_memory().unwrap();
         index
@@ -1005,7 +1130,7 @@ mod tests {
 
     #[test]
     fn floats_bytes_roundtrip() {
-        let original = vec![1.0f32, -2.5, 0.0, 3.14];
+        let original = vec![1.0f32, -2.5, 0.0, std::f32::consts::PI];
         let bytes = floats_to_bytes(&original);
         let recovered = bytes_to_floats(&bytes);
         assert_eq!(original, recovered);
