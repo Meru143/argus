@@ -139,7 +139,7 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileDiff>, ArgusError> {
 
         if let Some(path) = line.strip_prefix("+++ ") {
             file.new_path = parse_path(path);
-            if file.new_path == PathBuf::from("/dev/null") {
+            if file.new_path == std::path::Path::new("/dev/null") {
                 file.is_deleted_file = true;
             }
             continue;
