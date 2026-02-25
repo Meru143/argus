@@ -175,11 +175,42 @@ impl ArgusServer {
         }
     }
 
-    fn resolve_path(&self, path: &Option<String>) -> PathBuf {
-        match path {
-            Some(p) => PathBuf::from(p),
-            None => self.repo_path.clone(),
+    fn resolve_path(&self, path: &Option<String>) -> Result<PathBuf, McpError> {
+        let canonical_repo_path = self.repo_path.canonicalize().map_err(|e| {
+            mcp_err(format!(
+                "Failed to access configured repository path {}: {e}",
+                self.repo_path.display()
+            ))
+        })?;
+
+        let requested_path = match path {
+            Some(p) => {
+                let input_path = PathBuf::from(p);
+                if input_path.is_absolute() {
+                    input_path
+                } else {
+                    canonical_repo_path.join(input_path)
+                }
+            }
+            None => canonical_repo_path.clone(),
+        };
+
+        let canonical_requested_path = requested_path.canonicalize().map_err(|e| {
+            mcp_err(format!(
+                "Failed to resolve path {}: {e}",
+                requested_path.display()
+            ))
+        })?;
+
+        if !canonical_requested_path.starts_with(&canonical_repo_path) {
+            return Err(mcp_err(format!(
+                "Path {} is outside the configured repository {}",
+                canonical_requested_path.display(),
+                canonical_repo_path.display()
+            )));
         }
+
+        Ok(canonical_requested_path)
     }
 
     #[tool(
@@ -246,7 +277,7 @@ impl ArgusServer {
         &self,
         Parameters(params): Parameters<SearchCodebaseParams>,
     ) -> Result<CallToolResult, McpError> {
-        let repo_path = self.resolve_path(&params.path);
+        let repo_path = self.resolve_path(&params.path)?;
         let limit = params.limit.unwrap_or(10);
         let index_path = repo_path.join(".argus/index.db");
         let query = params.query;
@@ -323,7 +354,7 @@ impl ArgusServer {
         &self,
         Parameters(params): Parameters<GetRepoMapParams>,
     ) -> Result<CallToolResult, McpError> {
-        let repo_path = self.resolve_path(&params.path);
+        let repo_path = self.resolve_path(&params.path)?;
         let max_tokens = params.max_tokens.unwrap_or(2000);
 
         let map = argus_repomap::generate_map(
@@ -366,7 +397,7 @@ impl ArgusServer {
         &self,
         Parameters(params): Parameters<GetHotspotsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let repo_path = self.resolve_path(&params.path);
+        let repo_path = self.resolve_path(&params.path)?;
         let since_days = params.since_days.unwrap_or(180);
         let limit = params.limit.unwrap_or(20);
 
@@ -422,7 +453,7 @@ impl ArgusServer {
         &self,
         Parameters(params): Parameters<GetHistoryParams>,
     ) -> Result<CallToolResult, McpError> {
-        let repo_path = self.resolve_path(&params.path);
+        let repo_path = self.resolve_path(&params.path)?;
         let analysis = params.analysis.as_deref().unwrap_or("all");
         let since_days = params.since_days.unwrap_or(180);
         let min_coupling = params.min_coupling.unwrap_or(0.3);
@@ -486,5 +517,62 @@ impl ArgusServer {
 
         let json = serde_json::to_string_pretty(&response).map_err(|e| mcp_err(e.to_string()))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    #[test]
+    fn resolve_path_accepts_relative_in_repo_path() {
+        let repo = tempfile::tempdir().unwrap();
+        let src_dir = repo.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+
+        let server = ArgusServer::new(repo.path().to_path_buf());
+        let resolved = server.resolve_path(&Some("src".to_string())).unwrap();
+
+        assert_eq!(resolved, src_dir.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn resolve_path_accepts_absolute_in_repo_path() {
+        let repo = tempfile::tempdir().unwrap();
+        let nested_dir = repo.path().join("nested");
+        fs::create_dir_all(&nested_dir).unwrap();
+
+        let server = ArgusServer::new(repo.path().to_path_buf());
+        let resolved = server
+            .resolve_path(&Some(nested_dir.display().to_string()))
+            .unwrap();
+
+        assert_eq!(resolved, nested_dir.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn resolve_path_rejects_parent_escape() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir_all(repo.path().join("safe")).unwrap();
+
+        let server = ArgusServer::new(repo.path().to_path_buf());
+        let err = server.resolve_path(&Some("../".to_string())).unwrap_err();
+
+        assert!(err.message.contains("outside the configured repository"));
+    }
+
+    #[test]
+    fn resolve_path_rejects_absolute_out_of_repo_path() {
+        let repo = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+
+        let server = ArgusServer::new(repo.path().to_path_buf());
+        let err = server
+            .resolve_path(&Some(outside.path().display().to_string()))
+            .unwrap_err();
+
+        assert!(err.message.contains("outside the configured repository"));
     }
 }
