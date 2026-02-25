@@ -8,14 +8,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub stars](https://img.shields.io/github/stars/Meru143/argus)](https://github.com/Meru143/argus)
 
-Argus is a local-first, modular AI code review platform. One binary, six tools, zero lock-in. It combines structural analysis, semantic search, git history intelligence, and LLM-powered reviews to catch what your copilot misses.
+Argus is a local-first, modular AI code review platform. One binary, nine tools, zero lock-in. It combines structural analysis, semantic search, git history intelligence, and LLM-powered reviews to catch what your copilot misses.
 
 ## Why Argus?
 
 - **Independent review** — your AI agent wrote the code, a different AI reviews it. No self-grading.
 - **Full codebase context** — reviews use structural maps, semantic search, git history, and cross-file analysis. Not just the diff.
 - **Zero lock-in** — works with OpenAI, Anthropic, or Gemini. Switch providers in one line. **Gemini free tier = zero cost.**
-- **One binary, six tools** — map, diff, search, history, review, MCP server. Composable Unix-style subcommands.
+- **One binary, nine tools** — map, diff, search, history, review, describe, feedback, doctor, MCP server. Composable Unix-style subcommands.
 
 ## Get Started in 60 Seconds
 
