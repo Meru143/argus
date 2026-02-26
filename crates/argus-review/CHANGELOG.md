@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2](https://github.com/Meru143/argus/compare/argus-review-v0.5.1...argus-review-v0.5.2) - 2026-02-26
+
+### Other
+
+- Fix multiple bugs and performance issues across the workspace ([#60](https://github.com/Meru143/argus/pull/60))
+
 ## [0.5.0](https://github.com/Meru143/argus/compare/argus-review-v0.4.1...argus-review-v0.5.0) - 2026-02-25
 
 ### Other
