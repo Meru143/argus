@@ -97,8 +97,9 @@ pub fn build_system_prompt(
         prompt.push_str("The user has explicitly rejected similar comments in the past. Do NOT report issues like these:\n\n");
         for ex in negative_examples {
             // Truncate long examples to avoid token bloat
-            let display_ex = if ex.len() > 200 {
-                format!("{}...", &ex[..200])
+            let display_ex = if ex.chars().count() > 200 {
+                let truncated: String = ex.chars().take(200).collect();
+                format!("{truncated}...")
             } else {
                 ex.clone()
             };
