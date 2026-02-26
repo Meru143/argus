@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io::IsTerminal;
 use std::path::Path;
@@ -179,12 +179,12 @@ impl ReviewPipeline {
     /// Returns [`ArgusError::Llm`] if the LLM call fails.
     pub async fn review(
         &self,
-        diffs: &[FileDiff],
+        diffs: Vec<FileDiff>,
         repo_path: Option<&Path>,
     ) -> Result<ReviewResult, ArgusError> {
         // 1. Pre-filter diffs
         let diff_filter = DiffFilter::from_config(&self.config);
-        let filter_result = diff_filter.filter(diffs.to_vec());
+        let filter_result = diff_filter.filter(diffs);
         let kept_diffs = filter_result.kept;
         let skipped_files = filter_result.skipped;
         let files_skipped = skipped_files.len();
@@ -219,10 +219,12 @@ impl ReviewPipeline {
         let repo_map = if let Some(root) = repo_path {
             let focus_files: Vec<std::path::PathBuf> =
                 kept_diffs.iter().map(|d| d.new_path.clone()).collect();
-            match argus_repomap::generate_map(root, 1024, &focus_files, OutputFormat::Text) {
-                Ok(map) if !map.is_empty() => Some(map),
-                _ => None,
-            }
+            tokio::task::block_in_place(|| {
+                match argus_repomap::generate_map(root, 1024, &focus_files, OutputFormat::Text) {
+                    Ok(map) if !map.is_empty() => Some(map),
+                    _ => None,
+                }
+            })
         } else {
             None
         };
@@ -231,7 +233,7 @@ impl ReviewPipeline {
         let related_code = if let Some(root) = repo_path {
             let index_path = root.join(".argus/index.db");
             if index_path.exists() {
-                build_related_code_context(&kept_diffs, &index_path)
+                tokio::task::block_in_place(|| build_related_code_context(&kept_diffs, &index_path))
             } else {
                 None
             }
@@ -241,7 +243,7 @@ impl ReviewPipeline {
 
         // Build git history insights if repo is available
         let history_insights = if let Some(root) = repo_path {
-            build_history_insights(&kept_diffs, root)
+            tokio::task::block_in_place(|| build_history_insights(&kept_diffs, root))
         } else {
             None
         };
@@ -698,6 +700,27 @@ fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
 }
 
+/// Estimate tokens for a slice of diffs without building the full text string.
+///
+/// Uses the same `len / 4` heuristic as [`estimate_tokens`] but computes
+/// the byte length directly from the diff components to avoid a large
+/// intermediate allocation.
+fn estimate_diffs_tokens<D: std::borrow::Borrow<FileDiff>>(diffs: &[D]) -> usize {
+    let mut total_bytes: usize = 0;
+    for diff in diffs {
+        let diff = diff.borrow();
+        // Header lines: "--- a/{path}\n" + "+++ b/{path}\n"
+        total_bytes += 6 + diff.old_path.as_os_str().len() + 1;
+        total_bytes += 6 + diff.new_path.as_os_str().len() + 1;
+        for hunk in &diff.hunks {
+            // Hunk header: "@@ -X,Y +X,Y @@\n"
+            total_bytes += 20; // approximate hunk header
+            total_bytes += hunk.content.len();
+        }
+    }
+    total_bytes / 4
+}
+
 /// Group related diffs by parent directory, splitting groups that exceed
 /// `max_tokens`.
 ///
@@ -707,7 +730,7 @@ fn estimate_tokens(text: &str) -> usize {
 fn group_related_diffs<'a>(diffs: &'a [FileDiff], max_tokens: usize) -> Vec<Vec<&'a FileDiff>> {
     use std::path::PathBuf;
 
-    let mut dir_groups: HashMap<PathBuf, Vec<&'a FileDiff>> = HashMap::new();
+    let mut dir_groups: BTreeMap<PathBuf, Vec<&'a FileDiff>> = BTreeMap::new();
     for diff in diffs {
         let dir = Path::new(&diff.new_path)
             .parent()
@@ -721,7 +744,7 @@ fn group_related_diffs<'a>(diffs: &'a [FileDiff], max_tokens: usize) -> Vec<Vec<
         let mut current_group: Vec<&FileDiff> = Vec::new();
         let mut current_tokens: usize = 0;
         for file in files {
-            let file_tokens = estimate_tokens(&diffs_to_text(std::slice::from_ref(file)));
+            let file_tokens = estimate_diffs_tokens(std::slice::from_ref(file));
             if current_tokens + file_tokens > max_tokens && !current_group.is_empty() {
                 result.push(current_group);
                 current_group = Vec::new();

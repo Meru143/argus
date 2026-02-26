@@ -1,8 +1,7 @@
 use std::path::Path;
 
 use argus_codelens::store::{CodeIndex, Feedback};
-use argus_core::ReviewComment;
-use miette::Result; // Use miette::Result for easier error handling across crates
+use argus_core::{ArgusError, ReviewComment};
 use sha2::{Digest, Sha256};
 
 pub struct FeedbackStore {
@@ -10,14 +9,14 @@ pub struct FeedbackStore {
 }
 
 impl FeedbackStore {
-    pub fn open(repo_root: &Path) -> Result<Self> {
+    pub fn open(repo_root: &Path) -> Result<Self, ArgusError> {
         let index_path = repo_root.join(".argus/index.db");
         // Open the shared index (creates tables if needed)
         let index = CodeIndex::open(&index_path)?;
         Ok(Self { index })
     }
 
-    pub fn add_feedback(&self, comment: &ReviewComment, verdict: &str) -> Result<()> {
+    pub fn add_feedback(&self, comment: &ReviewComment, verdict: &str) -> Result<(), ArgusError> {
         let hash = compute_comment_hash(comment);
         // Map verdict string to integer rating
         let rating = match verdict {
@@ -39,8 +38,8 @@ impl FeedbackStore {
         Ok(())
     }
 
-    pub fn get_negative_examples(&self) -> Result<Vec<String>> {
-        Ok(self.index.get_negative_feedback(5)?)
+    pub fn get_negative_examples(&self) -> Result<Vec<String>, ArgusError> {
+        self.index.get_negative_feedback(5)
     }
 }
 

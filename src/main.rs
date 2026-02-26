@@ -1260,12 +1260,11 @@ async fn main() -> Result<()> {
             vouch,
             skip,
         }) => {
-            // Hint: suggest `argus init` when no config file exists
+            // Warn when no config file exists (config will use defaults)
             if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
-                miette::bail!(miette::miette!(
-                    help = "Run 'argus init' to create a default .argus.toml",
-                    "No configuration file found"
-                ));
+                eprintln!(
+                    "hint: no .argus.toml found, using defaults. Run 'argus init' to create one."
+                );
             }
 
             let repo_root = repo.clone().unwrap_or_else(|| PathBuf::from("."));
@@ -1471,7 +1470,7 @@ async fn main() -> Result<()> {
                 review_config,
                 config.rules.clone(),
             );
-            let result = pipeline.review(&diffs, repo.as_deref()).await?;
+            let result = pipeline.review(diffs, repo.as_deref()).await?;
 
             // Track iteration count for this commit
             let iteration = if let Some(ref commit_sha) = current_head_sha {
