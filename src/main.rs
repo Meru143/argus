@@ -453,6 +453,32 @@ fn format_review_metadata(
     }
 }
 
+/// Log review event to event log file
+fn log_review_event(
+    repo_root: &std::path::Path,
+    commit_sha: &str,
+    comment_count: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let log_dir = repo_root.join(".argus");
+    std::fs::create_dir_all(&log_dir)?;
+    let log_path = log_dir.join("review_events.jsonl");
+
+    let event = serde_json::json!({
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "commit": commit_sha,
+        "comment_count": comment_count,
+    });
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+
+    use std::io::Write;
+    writeln!(file, "{}", event)?;
+    Ok(())
+}
+
 /// Increment iteration count for a commit and return the new count
 fn increment_iteration(
     db_path: &std::path::Path,
@@ -1460,6 +1486,13 @@ async fn main() -> Result<()> {
             } else {
                 None
             };
+
+            // Log review event
+            if let Some(ref commit_sha) = current_head_sha {
+                if let Err(e) = log_review_event(&repo_root, commit_sha, result.comments.len()) {
+                    eprintln!("Warning: could not log event: {}", e);
+                }
+            }
 
             // Verbose output
             if cli.verbose {
