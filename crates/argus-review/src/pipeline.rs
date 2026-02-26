@@ -285,7 +285,8 @@ impl ReviewPipeline {
             .count();
 
         // 2. Decide whether to split or send as one call
-        let total_tokens = estimate_diffs_tokens(&kept_diffs);
+        let diff_text = diffs_to_text(&kept_diffs);
+        let total_tokens = estimate_tokens(&diff_text);
 
         // Fetch negative feedback examples
         let negative_examples = if let Some(root) = repo_path {
@@ -406,7 +407,6 @@ impl ReviewPipeline {
             }
         } else {
             // Single LLM call
-            let diff_text = diffs_to_text(&kept_diffs);
             let is_tty = std::io::stderr().is_terminal();
             let spinner = if is_tty {
                 let pb = ProgressBar::new_spinner();
@@ -470,10 +470,6 @@ impl ReviewPipeline {
 
         // 3. Deduplicate
         let (deduped, comments_deduplicated) = deduplicate(all_comments);
-
-        // Build the full diff text for self-reflection and summary
-        // (deferred from earlier to avoid allocation when splitting into groups)
-        let diff_text = diffs_to_text(&kept_diffs);
 
         // 3.5. Self-reflection pass: filter false positives
         let (reflected, comments_reflected_out) =
