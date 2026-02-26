@@ -39,7 +39,7 @@ impl FeedbackStore {
     }
 
     pub fn get_negative_examples(&self) -> Result<Vec<String>, ArgusError> {
-        Ok(self.index.get_negative_feedback(5)?)
+        self.index.get_negative_feedback(5)
     }
 }
 
