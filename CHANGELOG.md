@@ -2,6 +2,12 @@
 
 All notable changes to Argus are documented here.
 
+## [0.5.2](https://github.com/Meru143/argus/compare/argus-ai-v0.5.1...argus-ai-v0.5.2) - 2026-02-26
+
+### Other
+
+- Fix multiple bugs and performance issues across the workspace ([#60](https://github.com/Meru143/argus/pull/60))
+
 ## [0.5.1](https://github.com/Meru143/argus/compare/argus-ai-v0.5.0...argus-ai-v0.5.1) - 2026-02-26
 
 ### Added
