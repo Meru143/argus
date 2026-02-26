@@ -473,7 +473,7 @@ fn log_review_event(
         .create(true)
         .append(true)
         .open(&log_path)?;
-    
+
     use std::io::Write;
     writeln!(file, "{}", event)?;
     Ok(())
