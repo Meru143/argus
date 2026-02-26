@@ -219,10 +219,12 @@ impl ReviewPipeline {
         let repo_map = if let Some(root) = repo_path {
             let focus_files: Vec<std::path::PathBuf> =
                 kept_diffs.iter().map(|d| d.new_path.clone()).collect();
-            match argus_repomap::generate_map(root, 1024, &focus_files, OutputFormat::Text) {
-                Ok(map) if !map.is_empty() => Some(map),
-                _ => None,
-            }
+            tokio::task::block_in_place(|| {
+                match argus_repomap::generate_map(root, 1024, &focus_files, OutputFormat::Text) {
+                    Ok(map) if !map.is_empty() => Some(map),
+                    _ => None,
+                }
+            })
         } else {
             None
         };
@@ -231,7 +233,9 @@ impl ReviewPipeline {
         let related_code = if let Some(root) = repo_path {
             let index_path = root.join(".argus/index.db");
             if index_path.exists() {
-                build_related_code_context(&kept_diffs, &index_path)
+                tokio::task::block_in_place(|| {
+                    build_related_code_context(&kept_diffs, &index_path)
+                })
             } else {
                 None
             }
@@ -241,7 +245,7 @@ impl ReviewPipeline {
 
         // Build git history insights if repo is available
         let history_insights = if let Some(root) = repo_path {
-            build_history_insights(&kept_diffs, root)
+            tokio::task::block_in_place(|| build_history_insights(&kept_diffs, root))
         } else {
             None
         };
