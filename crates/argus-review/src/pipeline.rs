@@ -179,12 +179,12 @@ impl ReviewPipeline {
     /// Returns [`ArgusError::Llm`] if the LLM call fails.
     pub async fn review(
         &self,
-        diffs: &[FileDiff],
+        diffs: Vec<FileDiff>,
         repo_path: Option<&Path>,
     ) -> Result<ReviewResult, ArgusError> {
         // 1. Pre-filter diffs
         let diff_filter = DiffFilter::from_config(&self.config);
-        let filter_result = diff_filter.filter(diffs.to_vec());
+        let filter_result = diff_filter.filter(diffs);
         let kept_diffs = filter_result.kept;
         let skipped_files = filter_result.skipped;
         let files_skipped = skipped_files.len();
@@ -287,8 +287,7 @@ impl ReviewPipeline {
             .count();
 
         // 2. Decide whether to split or send as one call
-        let diff_text = diffs_to_text(&kept_diffs);
-        let total_tokens = estimate_tokens(&diff_text);
+        let total_tokens = estimate_diffs_tokens(&kept_diffs);
 
         // Fetch negative feedback examples
         let negative_examples = if let Some(root) = repo_path {
@@ -409,6 +408,7 @@ impl ReviewPipeline {
             }
         } else {
             // Single LLM call
+            let diff_text = diffs_to_text(&kept_diffs);
             let is_tty = std::io::stderr().is_terminal();
             let spinner = if is_tty {
                 let pb = ProgressBar::new_spinner();
@@ -472,6 +472,10 @@ impl ReviewPipeline {
 
         // 3. Deduplicate
         let (deduped, comments_deduplicated) = deduplicate(all_comments);
+
+        // Build the full diff text for self-reflection and summary
+        // (deferred from earlier to avoid allocation when splitting into groups)
+        let diff_text = diffs_to_text(&kept_diffs);
 
         // 3.5. Self-reflection pass: filter false positives
         let (reflected, comments_reflected_out) =
@@ -702,6 +706,27 @@ fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
 }
 
+/// Estimate tokens for a slice of diffs without building the full text string.
+///
+/// Uses the same `len / 4` heuristic as [`estimate_tokens`] but computes
+/// the byte length directly from the diff components to avoid a large
+/// intermediate allocation.
+fn estimate_diffs_tokens<D: std::borrow::Borrow<FileDiff>>(diffs: &[D]) -> usize {
+    let mut total_bytes: usize = 0;
+    for diff in diffs {
+        let diff = diff.borrow();
+        // Header lines: "--- a/{path}\n" + "+++ b/{path}\n"
+        total_bytes += 6 + diff.old_path.as_os_str().len() + 1;
+        total_bytes += 6 + diff.new_path.as_os_str().len() + 1;
+        for hunk in &diff.hunks {
+            // Hunk header: "@@ -X,Y +X,Y @@\n"
+            total_bytes += 20; // approximate hunk header
+            total_bytes += hunk.content.len();
+        }
+    }
+    total_bytes / 4
+}
+
 /// Group related diffs by parent directory, splitting groups that exceed
 /// `max_tokens`.
 ///
@@ -725,7 +750,7 @@ fn group_related_diffs<'a>(diffs: &'a [FileDiff], max_tokens: usize) -> Vec<Vec<
         let mut current_group: Vec<&FileDiff> = Vec::new();
         let mut current_tokens: usize = 0;
         for file in files {
-            let file_tokens = estimate_tokens(&diffs_to_text(std::slice::from_ref(file)));
+            let file_tokens = estimate_diffs_tokens(std::slice::from_ref(file));
             if current_tokens + file_tokens > max_tokens && !current_group.is_empty() {
                 result.push(current_group);
                 current_group = Vec::new();
