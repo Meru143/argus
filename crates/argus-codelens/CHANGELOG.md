@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/Meru143/argus/compare/argus-codelens-v0.4.1...argus-codelens-v0.5.0) - 2026-02-25
+
+### Other
+
+- Refactor vector_search to bounded top-k heap ([#56](https://github.com/Meru143/argus/pull/56))
+
 ## [0.4.0](https://github.com/Meru143/argus/compare/argus-codelens-v0.3.2...argus-codelens-v0.4.0) - 2026-02-17
 
 ### Added

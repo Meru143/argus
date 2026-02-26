@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/Meru143/argus/compare/argus-review-v0.4.1...argus-review-v0.5.0) - 2026-02-25
+
+### Other
+
+- Retry LLM calls on 429s and track retry telemetry ([#57](https://github.com/Meru143/argus/pull/57))
+- Sanitize and cap LLM provider error bodies ([#55](https://github.com/Meru143/argus/pull/55))
+
 ## [0.4.0](https://github.com/Meru143/argus/compare/argus-review-v0.3.2...argus-review-v0.4.0) - 2026-02-17
 
 ### Added
