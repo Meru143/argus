@@ -38,9 +38,8 @@ impl ReviewState {
                 state_path.display()
             ))
         })?;
-        let state = serde_json::from_str(&content).map_err(|e| {
-            ArgusError::Config(format!("failed to parse review state: {e}"))
-        })?;
+        let state = serde_json::from_str(&content)
+            .map_err(|e| ArgusError::Config(format!("failed to parse review state: {e}")))?;
         Ok(Some(state))
     }
 
@@ -49,16 +48,13 @@ impl ReviewState {
         let argus_dir = repo_root.join(".argus");
         if !argus_dir.exists() {
             std::fs::create_dir_all(&argus_dir).map_err(|e| {
-                ArgusError::Config(format!(
-                    "failed to create .argus directory: {e}"
-                ))
+                ArgusError::Config(format!("failed to create .argus directory: {e}"))
             })?;
         }
 
         let state_path = argus_dir.join("review-state.json");
-        let content = serde_json::to_string_pretty(self).map_err(|e| {
-            ArgusError::Config(format!("failed to serialize review state: {e}"))
-        })?;
+        let content = serde_json::to_string_pretty(self)
+            .map_err(|e| ArgusError::Config(format!("failed to serialize review state: {e}")))?;
         std::fs::write(&state_path, content).map_err(|e| {
             ArgusError::Config(format!(
                 "failed to write review state to {}: {e}",

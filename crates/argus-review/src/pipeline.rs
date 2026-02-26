@@ -233,9 +233,7 @@ impl ReviewPipeline {
         let related_code = if let Some(root) = repo_path {
             let index_path = root.join(".argus/index.db");
             if index_path.exists() {
-                tokio::task::block_in_place(|| {
-                    build_related_code_context(&kept_diffs, &index_path)
-                })
+                tokio::task::block_in_place(|| build_related_code_context(&kept_diffs, &index_path))
             } else {
                 None
             }
