@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io::IsTerminal;
 use std::path::Path;
@@ -707,7 +707,7 @@ fn estimate_tokens(text: &str) -> usize {
 fn group_related_diffs<'a>(diffs: &'a [FileDiff], max_tokens: usize) -> Vec<Vec<&'a FileDiff>> {
     use std::path::PathBuf;
 
-    let mut dir_groups: HashMap<PathBuf, Vec<&'a FileDiff>> = HashMap::new();
+    let mut dir_groups: BTreeMap<PathBuf, Vec<&'a FileDiff>> = BTreeMap::new();
     for diff in diffs {
         let dir = Path::new(&diff.new_path)
             .parent()
