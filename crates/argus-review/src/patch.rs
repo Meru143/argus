@@ -106,16 +106,19 @@ pub fn apply_patches(
                 continue;
             }
 
-            // Count how many lines the patch replaces: use the number of lines in the patch
+            // Replace only the single target line with the patch content.
+            // The patch is a replacement snippet for the flagged line; using
+            // the patch line count to determine how many original lines to
+            // remove is incorrect because the patch may expand a single line
+            // into multiple lines (or vice-versa). Replacing just the target
+            // line is the safest approach to avoid corrupting surrounding code.
             let patch_lines: Vec<&str> = patch_content.lines().collect();
-            let patch_line_count = patch_lines.len();
 
             // Replace starting at the target line (1-indexed)
             let start_idx = target_line - 1;
-            let end_idx = (start_idx + patch_line_count).min(lines.len());
 
             lines.splice(
-                start_idx..end_idx,
+                start_idx..start_idx + 1,
                 patch_lines.iter().map(|l| l.to_string()),
             );
 
@@ -239,5 +242,39 @@ mod tests {
         assert!(content.contains("line5"));
         assert!(!content.contains("\nline2\n"));
         assert!(!content.contains("\nline4\n"));
+    }
+
+    #[test]
+    fn test_multiline_patch_expands_single_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("expand.rs");
+        std::fs::write(
+            &file_path,
+            "fn main() {\n    old_call();\n    keep_me();\n}\n",
+        )
+        .unwrap();
+
+        // A multi-line patch replacing a single target line should NOT
+        // overwrite the lines that follow.
+        let comments = vec![make_comment(
+            "expand.rs",
+            2,
+            Some("    let x = setup();\n    new_call(x);"),
+            "expand one line to two",
+        )];
+
+        let result = apply_patches(&comments, dir.path()).unwrap();
+        assert_eq!(result.applied.len(), 1);
+        assert_eq!(result.skipped.len(), 0);
+
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        // The patch should have replaced only line 2, inserting 2 new lines
+        assert!(content.contains("setup()"));
+        assert!(content.contains("new_call(x)"));
+        // Line 3 ("keep_me()") must NOT be overwritten
+        assert!(
+            content.contains("keep_me()"),
+            "multi-line patch must not overwrite subsequent lines"
+        );
     }
 }
