@@ -1260,12 +1260,9 @@ async fn main() -> Result<()> {
             vouch,
             skip,
         }) => {
-            // Hint: suggest `argus init` when no config file exists
+            // Warn when no config file exists (config will use defaults)
             if cli.config.is_none() && !std::path::Path::new(".argus.toml").exists() {
-                miette::bail!(miette::miette!(
-                    help = "Run 'argus init' to create a default .argus.toml",
-                    "No configuration file found"
-                ));
+                eprintln!("hint: no .argus.toml found, using defaults. Run 'argus init' to create one.");
             }
 
             let repo_root = repo.clone().unwrap_or_else(|| PathBuf::from("."));
