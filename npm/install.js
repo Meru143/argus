@@ -6,6 +6,7 @@ const os = require("os");
 
 const VERSION = require("./package.json").version;
 const REPO = "Meru143/argus";
+const RELEASE_TAG_PREFIX = "argus-ai-v";
 
 const PLATFORM_MAP = {
   "darwin-x64": "argus-x86_64-apple-darwin.tar.gz",
@@ -20,7 +21,7 @@ function getPlatformKey() {
 }
 
 function getDownloadUrl(asset) {
-  return `https://github.com/${REPO}/releases/download/v${VERSION}/${asset}`;
+  return `https://github.com/${REPO}/releases/download/${RELEASE_TAG_PREFIX}${VERSION}/${asset}`;
 }
 
 function download(url) {

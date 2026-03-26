@@ -228,6 +228,10 @@ Argus supports natural language custom rules. Create a file at `.argus/rules.md`
 | Anthropic | `provider = "anthropic"` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
 | Ollama | `provider = "ollama"` | `llama3` | (None) |
 
+For custom provider endpoints, set `[llm].base_url`. OpenAI-compatible and Gemini
+base URLs can be provided either with or without the version suffix, for example
+`https://openrouter.ai/api` or `https://openrouter.ai/api/v1`.
+
 ### Embedding Providers
 
 | Provider | Config | Model | Env Variable |

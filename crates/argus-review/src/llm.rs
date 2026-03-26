@@ -82,6 +82,20 @@ pub struct LlmClient {
 
 const MAX_ERROR_REASON_CHARS: usize = 320;
 
+fn versioned_base_url(
+    base_url: Option<&str>,
+    default_base_url: &str,
+    version_suffix: &str,
+) -> String {
+    let normalized = base_url.unwrap_or(default_base_url).trim_end_matches('/');
+
+    if normalized.ends_with(version_suffix) {
+        normalized.to_string()
+    } else {
+        format!("{normalized}{version_suffix}")
+    }
+}
+
 impl std::fmt::Debug for LlmClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LlmClient")
@@ -195,8 +209,9 @@ impl LlmClient {
             )
         })?;
 
-        let base_url = self.base_url.as_deref().unwrap_or("https://api.openai.com");
-        let url = format!("{base_url}/v1/chat/completions");
+        let base_url =
+            versioned_base_url(self.base_url.as_deref(), "https://api.openai.com", "/v1");
+        let url = format!("{base_url}/chat/completions");
 
         let body = serde_json::json!({
             "model": self.model,
@@ -261,11 +276,9 @@ impl LlmClient {
             )
         })?;
 
-        let base_url = self
-            .base_url
-            .as_deref()
-            .unwrap_or("https://api.anthropic.com");
-        let url = format!("{base_url}/v1/messages");
+        let base_url =
+            versioned_base_url(self.base_url.as_deref(), "https://api.anthropic.com", "/v1");
+        let url = format!("{base_url}/messages");
 
         // Extract system message(s) and non-system messages
         let mut system_parts: Vec<String> = Vec::new();
@@ -368,13 +381,14 @@ impl LlmClient {
             )
         })?;
 
-        let base_url = self
-            .base_url
-            .as_deref()
-            .unwrap_or("https://generativelanguage.googleapis.com");
+        let base_url = versioned_base_url(
+            self.base_url.as_deref(),
+            "https://generativelanguage.googleapis.com",
+            "/v1beta",
+        );
 
         let url = format!(
-            "{base_url}/v1beta/models/{}:generateContent?key={api_key}",
+            "{base_url}/models/{}:generateContent?key={api_key}",
             self.model,
         );
 
@@ -801,6 +815,42 @@ mod tests {
         assert_eq!(merged[1].content, "reply");
         assert_eq!(merged[1].role, Role::Assistant);
         assert_eq!(merged[2].content, "third");
+    }
+
+    #[test]
+    fn versioned_base_url_appends_missing_suffix() {
+        assert_eq!(
+            versioned_base_url(
+                Some("https://api.openai.com"),
+                "https://api.openai.com",
+                "/v1"
+            ),
+            "https://api.openai.com/v1"
+        );
+    }
+
+    #[test]
+    fn versioned_base_url_keeps_existing_suffix() {
+        assert_eq!(
+            versioned_base_url(
+                Some("https://openrouter.ai/api/v1"),
+                "https://api.openai.com",
+                "/v1",
+            ),
+            "https://openrouter.ai/api/v1"
+        );
+    }
+
+    #[test]
+    fn versioned_base_url_trims_trailing_slash() {
+        assert_eq!(
+            versioned_base_url(
+                Some("https://generativelanguage.googleapis.com/v1beta/"),
+                "https://generativelanguage.googleapis.com",
+                "/v1beta",
+            ),
+            "https://generativelanguage.googleapis.com/v1beta"
+        );
     }
 
     #[test]

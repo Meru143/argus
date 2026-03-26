@@ -782,26 +782,24 @@ fn chrono_days_ago(days: i64) -> i64 {
 const DEFAULT_CONFIG: &str = r#"# Argus Configuration
 # See: https://github.com/Meru143/argus
 
-[review]
-# LLM provider (OpenAI-compatible endpoint)
-# api_base = "https://api.openai.com/v1"
+[llm]
+# provider = "openai"
+# base_url = "https://api.openai.com"
 # model = "gpt-4o"
-# max_findings = 5
 
-[review.noise]
+[review]
+# max_comments = 5
 # skip_patterns = ["*.lock", "*.min.js", "vendor/**"]
+# skip_extensions = ["snap", "lock"]
 # min_confidence = 90
 # include_suggestions = false
+# cross_file = true
 # self_reflection = true
 # self_reflection_score_threshold = 7
 
 [embedding]
 # provider = "voyage"
 # model = "voyage-code-3"
-
-[history]
-# since_days = 180
-# max_files_per_commit = 25
 
 # Custom review rules (injected into LLM prompt)
 # [[rules]]

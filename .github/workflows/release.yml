@@ -6,7 +6,7 @@ permissions:
 on:
   push:
     tags:
-      - 'v*'
+      - 'argus-ai-v*'
 
 jobs:
   build:
