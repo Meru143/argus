@@ -2,6 +2,12 @@
 
 All notable changes to Argus are documented here.
 
+## [0.5.3](https://github.com/Meru143/argus/compare/argus-ai-v0.5.2...argus-ai-v0.5.3) - 2026-03-26
+
+### Other
+
+- Fix release tags and normalize provider base URLs ([#64](https://github.com/Meru143/argus/pull/64))
+
 ## [0.5.2](https://github.com/Meru143/argus/compare/argus-ai-v0.5.1...argus-ai-v0.5.2) - 2026-02-26
 
 ### Other

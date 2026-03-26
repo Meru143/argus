@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3](https://github.com/Meru143/argus/compare/argus-review-v0.5.2...argus-review-v0.5.3) - 2026-03-26
+
+### Other
+
+- Fix release tags and normalize provider base URLs ([#64](https://github.com/Meru143/argus/pull/64))
+
 ## [0.5.2](https://github.com/Meru143/argus/compare/argus-review-v0.5.1...argus-review-v0.5.2) - 2026-02-26
 
 ### Other
