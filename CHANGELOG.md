@@ -2,6 +2,16 @@
 
 All notable changes to Argus are documented here.
 
+## [0.5.5](https://github.com/Meru143/argus/compare/argus-ai-v0.5.4...argus-ai-v0.5.5) - 2026-04-04
+
+### Fixed
+
+- align npm package usage across docs and launcher ([#71](https://github.com/Meru143/argus/pull/71))
+
+### Other
+
+- promote independent review headline ([#69](https://github.com/Meru143/argus/pull/69))
+
 ## [0.5.4](https://github.com/Meru143/argus/compare/argus-ai-v0.5.3...argus-ai-v0.5.4) - 2026-04-04
 
 ### Other
