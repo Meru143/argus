@@ -13,7 +13,7 @@ Argus is a local-first AI code review platform for teams that want an independen
 The short version is simple: your coding agent should not grade its own homework.
 
 ```bash
-git diff HEAD~1 | npx argus review --repo .
+git diff HEAD~1 | npx argus-ai review --repo .
 ```
 
 Live page: [merup.me/argus](https://merup.me/argus/)
@@ -29,13 +29,13 @@ Live page: [merup.me/argus](https://merup.me/argus/)
 
 ```bash
 # 1. Install via npm
-npx argus init             # creates .argus.toml
+npx argus-ai init          # creates .argus.toml
 
 # 2. Set your key (Gemini, Anthropic, or OpenAI)
 export GEMINI_API_KEY="your-key"
 
 # 3. Review your changes
-git diff HEAD~1 | npx argus review --repo .
+git diff HEAD~1 | npx argus-ai review --repo .
 ```
 
 ## Install
@@ -50,7 +50,7 @@ brew install argus
 ### npm (Recommended)
 
 ```bash
-npx argus --help
+npx argus-ai --help
 # or
 npm install -g argus-ai
 ```
@@ -164,7 +164,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          argus-ai review \
+          argus review \
             --diff origin/${{ github.base_ref }}..HEAD \
             --pr ${{ github.repository }}#${{ github.event.pull_request.number }} \
             --post-comments \
