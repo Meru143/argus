@@ -13,7 +13,7 @@ if (process.platform === "win32") {
 
 if (!fs.existsSync(binary)) {
   console.error(
-    "argus binary not found. Run `npm install` or `npx argus-ai` to download it."
+    "argus binary not found. Run `npm install` or `npx argus` to download it."
   );
   process.exit(1);
 }
