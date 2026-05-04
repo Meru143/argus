@@ -23,6 +23,18 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+          # musl builds: statically linked, no GLIBC dependency. The
+          # *-unknown-linux-gnu binaries built on modern Ubuntu runners
+          # require GLIBC 2.39+, so they crash on older base images
+          # (Debian Bookworm ships GLIBC 2.36, Alpine uses musl, etc.).
+          # use_cross=true delegates to `cross`, which uses a Docker image
+          # with the full musl toolchain — no host-side apt acrobatics.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
           - target: x86_64-apple-darwin
             os: macos-latest
           - target: aarch64-apple-darwin
@@ -47,7 +59,16 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
-      - name: Build
+      - name: Install cross (musl targets)
+        if: matrix.use_cross
+        run: cargo install cross --locked
+
+      - name: Build (cross)
+        if: matrix.use_cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build (cargo)
+        if: ${{ !matrix.use_cross }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package (unix)
