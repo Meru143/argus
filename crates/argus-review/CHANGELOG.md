@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6](https://github.com/Meru143/argus/compare/argus-review-v0.5.5...argus-review-v0.5.6) - 2026-05-04
+
+### Fixed
+
+- *(lint)* satisfy clippy 1.95 unnecessary_sort_by in patch.rs
+
 ## [0.5.3](https://github.com/Meru143/argus/compare/argus-review-v0.5.2...argus-review-v0.5.3) - 2026-03-26
 
 ### Other
