@@ -6,7 +6,13 @@ permissions:
 on:
   push:
     tags:
-      - 'argus-ai-v*'
+      # release-plz reliably creates per-workspace-crate tags
+      # (`argus-core-v*`, `argus-mcp-v*`, etc.) on every release cycle. The
+      # `argus-ai-v*` tag for the root binary crate is no longer produced
+      # automatically; binary releases broke after v0.5.3 because this
+      # workflow was waiting for that pattern. Triggering on argus-core-v*
+      # restores the binary release flow.
+      - 'argus-core-v*'
 
 jobs:
   build:
