@@ -173,8 +173,13 @@ pub fn analyze_ownership(commits: &[CommitInfo]) -> Result<OwnershipSummary, Arg
             });
         }
 
-        // Sort authors by commits descending
-        author_contribs.sort_by(|a, b| b.commits.cmp(&a.commits));
+        // Sort authors by commits descending, tie-breaking on email so the
+        // output order is deterministic across HashMap iteration runs.
+        author_contribs.sort_by(|a, b| {
+            b.commits
+                .cmp(&a.commits)
+                .then_with(|| a.email.cmp(&b.email))
+        });
 
         let dominant_author_ratio = max_commits as f64 / total_commits as f64;
         let bus_factor = author_contribs.iter().filter(|a| a.ratio > 0.10).count() as u32;
@@ -232,9 +237,12 @@ fn compute_project_bus_factor(files: &[FileOwnership]) -> u32 {
         }
     }
 
-    // Sort authors by number of files they contribute to (descending)
+    // Sort by file count descending, tie-breaking on email. Without the
+    // tie-break, HashMap iteration order makes the early-return below
+    // (orphaned > threshold) non-deterministic — different runs could
+    // remove different tied authors first and report different bus factors.
     let mut sorted_authors: Vec<(String, u32)> = all_authors.into_iter().collect();
-    sorted_authors.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted_authors.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
     let total_files = files.len();
     let threshold = total_files / 2;

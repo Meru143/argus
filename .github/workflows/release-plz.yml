@@ -28,17 +28,32 @@ jobs:
         with:
           command: release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GH_PAT lets release-plz's bot tag pushes trigger downstream
+          # workflows like `Release` (release.yml). With plain GITHUB_TOKEN,
+          # GitHub Actions' anti-recursion rule silently suppresses workflow
+          # runs from bot-pushed tags
+          # (https://docs.github.com/en/actions/using-workflows/triggering-a-workflow#triggering-a-workflow-from-a-workflow),
+          # which is why binary releases stopped attaching after v0.2.2.
+          #
+          # Recommended: a fine-grained PAT scoped to this repo with
+          # `Contents: Read & write` (and `Pull requests: Read & write` if
+          # you also want this token to drive the release-pr step). A
+          # GitHub App token with the same permissions is even better —
+          # tokens are short-lived and scoped to the installation.
+          # Avoid classic PATs with the broad `workflow` scope unless
+          # actually needed; tag pushes alone don't require it.
+          # Falls back to GITHUB_TOKEN if GH_PAT isn't configured (no break for forks).
+          GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       # Create PR for next release if changes exist
       - name: Create Release PR
         uses: release-plz/action@v0.5
-        if: steps.release-plz.outputs.releases == '[]' || steps.release-plz.outputs.releases == '' 
+        if: steps.release-plz.outputs.releases == '[]' || steps.release-plz.outputs.releases == ''
         with:
           command: release-pr
         env:
-          # Use GH_PAT if set to trigger CI workflows, otherwise fallback to GITHUB_TOKEN
+          # Same token requirements as above — see comment on the release step.
           GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 

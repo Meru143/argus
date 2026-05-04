@@ -87,7 +87,7 @@ pub fn apply_patches(
         let mut lines: Vec<String> = file_content.lines().map(String::from).collect();
 
         // Sort by line number descending (bottom-up) to avoid offset issues
-        file_comments.sort_by(|a, b| b.line.cmp(&a.line));
+        file_comments.sort_by_key(|c| std::cmp::Reverse(c.line));
 
         for comment in &file_comments {
             let patch_content = comment.patch.as_deref().unwrap();
