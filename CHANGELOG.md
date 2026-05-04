@@ -2,6 +2,24 @@
 
 All notable changes to Argus are documented here.
 
+## [0.5.6](https://github.com/Meru143/argus/compare/argus-ai-v0.5.5...argus-ai-v0.5.6) - 2026-05-04
+
+### Added
+
+- *(ci)* add musl Linux build targets
+
+### Fixed
+
+- *(ci)* keep release trigger on argus-ai-v* and pin cross
+- *(ci)* trigger Release on argus-core-v* tag (consistent with release-plz)
+- *(ci)* use GH_PAT for release-plz release step so tag pushes trigger CI
+- tighten landing page hero terminal
+- tighten landing page proof layout
+
+### Other
+
+- *(ci)* tighten GH_PAT scope guidance to least-privilege
+
 ## [0.5.5](https://github.com/Meru143/argus/compare/argus-ai-v0.5.4...argus-ai-v0.5.5) - 2026-04-04
 
 ### Fixed
