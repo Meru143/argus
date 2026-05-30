@@ -67,6 +67,9 @@ petgraph = "0.7"
 ignore = "0.4"
 glob = "0.3"
 rusqlite = { version = "0.32", features = ["bundled", "vtab"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = "0.6"
 sha2 = "0.10"
 rmcp = { version = "0.15", features = ["server", "transport-io"] }
 miette = { version = "7", features = ["fancy"] }
@@ -107,6 +110,9 @@ rusqlite = { workspace = true }
 git2 = { workspace = true }
 indicatif = { workspace = true }
 chrono = { version = "0.4.43", features = ["serde"] }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
