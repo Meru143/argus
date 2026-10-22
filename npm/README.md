@@ -12,7 +12,7 @@ Argus is an AI code review tool built in Rust. It parses diffs, scores risk, bui
 
 - **Multi-provider LLM**: OpenAI, Anthropic, Gemini
 - **Multi-provider embeddings**: Voyage, Gemini, OpenAI
-- **Zero-cost path**: Use Gemini for both LLM and embeddings (free tier, no credit card). Google may use free-tier inputs to improve its products and human reviewers may read them, so use a paid key for private code.
+- **Zero-cost path**: Use Gemini for both LLM and embeddings (free tier, no credit card). Google may use free-tier prompts and responses to improve its products and human reviewers may read them, so use a paid key for private code.
 - **MCP server**: 5 tools for IDE integration
 - **GitHub integration**: Inline PR comments, CI gating
 

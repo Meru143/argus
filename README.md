@@ -22,7 +22,7 @@ Live page: [merup.me/argus](https://merup.me/argus/)
 
 - **Independent review** — your AI agent wrote the code, a different AI reviews it. No self-grading.
 - **Full codebase context** — reviews use structural maps, semantic search, git history, and cross-file analysis. Not just the diff.
-- **Zero lock-in** — works with OpenAI, Anthropic, or Gemini. Switch providers in one line. **Gemini's free tier costs nothing**, but Google may use free-tier inputs to improve its products and human reviewers may read them, so use a paid key for private code.
+- **Zero lock-in** — works with OpenAI, Anthropic, or Gemini. Switch providers in one line. **Gemini's free tier costs nothing**, but Google may use free-tier prompts and responses to improve its products and human reviewers may read them, so use a paid key for private code.
 - **One binary, eleven subcommands** — map, diff, search, history, review, describe, feedback, hook, init, doctor, and `mcp`, an MCP server. Composable, Unix-style.
 
 ## Get Started in 60 Seconds
