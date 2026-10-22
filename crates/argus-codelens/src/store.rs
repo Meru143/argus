@@ -882,9 +882,8 @@ fn floats_to_bytes(floats: &[f32]) -> Vec<u8> {
 
 fn bytes_to_floats(bytes: &[u8]) -> Vec<f32> {
     let mut floats = Vec::with_capacity(bytes.len() / 4);
-    for chunk in bytes.chunks_exact(4) {
-        let arr: [u8; 4] = [chunk[0], chunk[1], chunk[2], chunk[3]];
-        floats.push(f32::from_le_bytes(arr));
+    for chunk in bytes.as_chunks::<4>().0 {
+        floats.push(f32::from_le_bytes(*chunk));
     }
     floats
 }
