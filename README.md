@@ -22,8 +22,8 @@ Live page: [merup.me/argus](https://merup.me/argus/)
 
 - **Independent review** — your AI agent wrote the code, a different AI reviews it. No self-grading.
 - **Full codebase context** — reviews use structural maps, semantic search, git history, and cross-file analysis. Not just the diff.
-- **Zero lock-in** — works with OpenAI, Anthropic, or Gemini. Switch providers in one line. **Gemini free tier = zero cost.**
-- **One binary, nine tools** — map, diff, search, history, review, describe, feedback, doctor, MCP server. Composable Unix-style subcommands.
+- **Zero lock-in** — works with OpenAI, Anthropic, or Gemini. Switch providers in one line. **Gemini's free tier costs nothing**, but Google may use free-tier prompts and responses to improve its products and human reviewers may read them, so use a paid key for private code.
+- **One binary, eleven subcommands** — map, diff, search, history, review, describe, feedback, hook, init, doctor, and `mcp`, an MCP server. Composable, Unix-style.
 
 ## Get Started in 60 Seconds
 
@@ -248,7 +248,7 @@ base URLs can be provided either with or without the version suffix, for example
 | Voyage | `provider = "voyage"` | `voyage-code-3` | `VOYAGE_API_KEY` |
 | OpenAI | `provider = "openai"` | `text-embedding-3-small` | `OPENAI_API_KEY` |
 
-**Zero-cost setup:** Use Gemini for both LLM and embeddings with a [free API key](https://aistudio.google.com/apikey).
+**Zero-cost setup:** Use Gemini for both LLM and embeddings with a [free API key](https://aistudio.google.com/apikey). On the free tier, Google may use your prompts and responses to improve its products, and human reviewers may read them ([Gemini API terms](https://ai.google.dev/gemini-api/terms)), so use a paid key for private code.
 
 ```toml
 [llm]
